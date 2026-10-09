@@ -78,6 +78,7 @@ private:
     std::string presetError_;
     int pendingRemove_ = -1;
     bool animating_ = false;
+    bool scrollToNewStrip_ = false;
 };
 
 } // namespace psm

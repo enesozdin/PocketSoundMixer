@@ -15,8 +15,9 @@ constexpr float kMinFaderDb = -60.0f; // fader bottom = silence
 constexpr float kMaxFaderDb = 6.0f;
 constexpr float kMeterFloorDb = -60.0f;
 constexpr float kMeterFallDbPerSec = 24.0f;
-constexpr float kStripWidth = 340.0f;
+constexpr float kStripWidth = 326.0f;
 constexpr float kSliderHeight = 160.0f;
+constexpr float kBandWidth = 22.0f;
 
 float faderDbToLinear(float db)
 {
@@ -285,10 +286,18 @@ void MixerUI::draw(float dt)
     drawTopBar(dt);
     ImGui::Separator();
 
-    ImGui::BeginChild("strips", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
+    // Strips wrap into rows that fill the window width; extra rows scroll vertically,
+    // so every channel stays visible without a sideways scrollbar.
+    ImGui::BeginChild("strips", ImVec2(0, 0), ImGuiChildFlags_None);
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const int perRow = std::max(1, static_cast<int>((ImGui::GetContentRegionAvail().x + spacing) / (kStripWidth + spacing)));
     for (size_t i = 0; i < strips_.size(); ++i) {
-        if (i > 0) ImGui::SameLine();
+        if (i % static_cast<size_t>(perRow) != 0) ImGui::SameLine();
         drawStrip(strips_[i], i, dt);
+    }
+    if (scrollToNewStrip_) {
+        ImGui::SetScrollHereY(1.0f);
+        scrollToNewStrip_ = false;
     }
     if (strips_.empty()) {
         ImGui::TextDisabled("No channels. Click \"+ Add channel\" or drop audio files here.");
@@ -312,7 +321,9 @@ void MixerUI::drawTopBar(float dt)
     Mixer& mixer = engine_.mixer();
 
     if (ImGui::Button("+ Add channel")) {
-        addStrip("Channel " + std::to_string(strips_.size() + 1));
+        if (addStrip("Channel " + std::to_string(strips_.size() + 1))) {
+            scrollToNewStrip_ = true;
+        }
     }
     ImGui::SameLine();
     if (ImGui::Button("Presets")) {
@@ -568,12 +579,12 @@ void MixerUI::drawEq(Strip& strip)
     Channel& ch = *strip.channel;
     EqGains gains = ch.gains();
     ImGui::BeginGroup();
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.0f, 4.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(3.0f, 4.0f));
     for (int b = 0; b < kEqBands; ++b) {
         if (b > 0) ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::PushID(b);
-        if (ImGui::VSliderFloat("##band", ImVec2(22.0f, kSliderHeight), &gains[b], kEqMinGainDb, kEqMaxGainDb, "")) {
+        if (ImGui::VSliderFloat("##band", ImVec2(kBandWidth, kSliderHeight), &gains[b], kEqMinGainDb, kEqMaxGainDb, "")) {
             ch.setGain(b, gains[b]);
             strip.presetModified = true;
             strip.curveDirty = true;
@@ -587,7 +598,7 @@ void MixerUI::drawEq(Strip& strip)
             ImGui::SetTooltip("%s Hz: %+.1f dB", kEqBandLabels[b], gains[b]);
         }
         const float textW = ImGui::CalcTextSize(kEqBandLabels[b]).x;
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (22.0f - textW) * 0.5f));
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (kBandWidth - textW) * 0.5f); // may hang over a little, like real EQ labels
         ImGui::TextUnformatted(kEqBandLabels[b]);
         ImGui::PopID();
         ImGui::EndGroup();
