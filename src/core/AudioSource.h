@@ -58,6 +58,8 @@ public:
     virtual const std::string& exeName() const = 0; // e.g. "Spotify.exe"
     virtual State state() const = 0;
     virtual std::string lastError() const = 0;      // UI thread
+    // True while the app's own output is moved to the silent device (so it is heard only via the mixer).
+    virtual bool isRerouted() const = 0;
 };
 
 } // namespace psm

@@ -8,9 +8,15 @@ bool appCaptureSupported() { return false; }
 
 std::vector<AudioAppInfo> listAudioApps() { return {}; }
 
+std::vector<OutputDeviceInfo> listOutputDevices() { return {}; }
+
+void resetAllAppOutputs() {}
+
+std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>&) { return {}; }
+
 void openAppVolumeSettings() {}
 
-std::unique_ptr<AppSource> openAppCapture(const std::string&, uint32_t, std::string* error)
+std::unique_ptr<AppSource> openAppCapture(const std::string&, uint32_t, const std::string&, std::string* error)
 {
     if (error) *error = "Per-app capture is only available on Windows for now";
     return nullptr;
@@ -30,7 +36,10 @@ std::unique_ptr<AppSource> openAppCapture(const std::string&, uint32_t, std::str
 #include <audioclientactivationparams.h>
 #include <audiopolicy.h>
 #include <avrt.h>
+#include <inspectable.h>
 #include <mmdeviceapi.h>
+#include <roapi.h>
+#include <winstring.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
 #include <wrl/client.h>
@@ -39,6 +48,7 @@ std::unique_ptr<AppSource> openAppCapture(const std::string&, uint32_t, std::str
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cwchar>
 #include <cwctype>
 #include <map>
 #include <mutex>
@@ -159,12 +169,146 @@ std::string hresultText(const char* what, HRESULT hr)
     return buf;
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Per-app output routing through Windows' AudioPolicyConfig. This is what the Settings page
+// "App volume and device preferences" uses. It is undocumented but has kept the same layout
+// since Windows 10 1803 (EarTrumpet relies on it too); only the interface id changed in 21H2.
+struct IAudioPolicyConfigFactory : public IInspectable {
+    // 19 methods we never call, kept only for the vtable layout.
+    virtual HRESULT STDMETHODCALLTYPE Unused00() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused01() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused02() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused03() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused04() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused05() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused06() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused07() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused08() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused09() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused10() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused11() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused12() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused13() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused14() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused15() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused16() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused17() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unused18() = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetPersistedDefaultAudioEndpoint(UINT32 processId, EDataFlow flow, ERole role, HSTRING deviceId) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetPersistedDefaultAudioEndpoint(UINT32 processId, EDataFlow flow, ERole role, HSTRING* deviceId) = 0;
+    virtual HRESULT STDMETHODCALLTYPE ClearAllPersistedApplicationDefaultEndpoints() = 0;
+};
+
+constexpr wchar_t kMmDevApiToken[] = L"\\\\?\\SWD#MMDEVAPI#";
+constexpr wchar_t kRenderInterface[] = L"#{e6327cad-dcec-4949-ae8a-991e976a79d2}";
+
+DWORD windowsBuildNumber()
+{
+    using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOW*);
+    OSVERSIONINFOW info{};
+    info.dwOSVersionInfoSize = sizeof(info);
+    if (HMODULE ntdll = GetModuleHandleW(L"ntdll.dll")) {
+        if (auto fn = reinterpret_cast<RtlGetVersionFn>(reinterpret_cast<void*>(GetProcAddress(ntdll, "RtlGetVersion")))) {
+            fn(&info);
+        }
+    }
+    return info.dwBuildNumber;
+}
+
+ComPtr<IAudioPolicyConfigFactory> createPolicyConfig()
+{
+    static const IID kIid21H2 = {0xab3d4648, 0xe242, 0x459f, {0xb0, 0x2f, 0x54, 0x1c, 0x70, 0x30, 0x63, 0x24}};
+    static const IID kIidDownlevel = {0x2a59116d, 0x6c4f, 0x45e0, {0xa7, 0x4f, 0x70, 0x7e, 0x3f, 0xef, 0x92, 0x58}};
+    const wchar_t className[] = L"Windows.Media.Internal.AudioPolicyConfig";
+    HSTRING_HEADER header{};
+    HSTRING name = nullptr;
+    ComPtr<IAudioPolicyConfigFactory> factory;
+    if (SUCCEEDED(WindowsCreateStringReference(className, static_cast<UINT32>(wcslen(className)), &header, &name))) {
+        const IID& iid = windowsBuildNumber() >= 21390 ? kIid21H2 : kIidDownlevel;
+        RoGetActivationFactory(name, iid, reinterpret_cast<void**>(factory.GetAddressOf()));
+    }
+    return factory;
+}
+
+std::vector<DWORD> processesNamed(const std::wstring& exe)
+{
+    std::vector<DWORD> pids;
+    for (const auto& [pid, entry] : snapshotProcesses()) {
+        if (equalsNoCase(entry.exe, exe)) pids.push_back(pid);
+    }
+    return pids;
+}
+
+// Moves every process of one app to another output and remembers where each one was,
+// so restore() puts things back exactly as the user had them.
+class AppRouter {
+public:
+    void route(const std::wstring& exe, const std::wstring& endpointId)
+    {
+        if (endpointId.empty()) return;
+        if (!policy_) policy_ = createPolicyConfig();
+        if (!policy_) return;
+        const std::wstring full = std::wstring(kMmDevApiToken) + endpointId + kRenderInterface;
+        HSTRING target = nullptr;
+        if (FAILED(WindowsCreateString(full.c_str(), static_cast<UINT32>(full.size()), &target))) return;
+        for (DWORD pid : processesNamed(exe)) {
+            if (previous_.count(pid)) continue; // already moved
+            HSTRING before = nullptr;
+            policy_->GetPersistedDefaultAudioEndpoint(pid, eRender, eMultimedia, &before);
+            if (before && full == WindowsGetStringRawBuffer(before, nullptr)) {
+                // Still parked from an earlier run (the app closed while captured):
+                // its real setting was the system default.
+                WindowsDeleteString(before);
+                before = nullptr;
+            }
+            previous_[pid] = before; // null: the app follows the system default
+            policy_->SetPersistedDefaultAudioEndpoint(pid, eRender, eMultimedia, target);
+            policy_->SetPersistedDefaultAudioEndpoint(pid, eRender, eConsole, target);
+        }
+        WindowsDeleteString(target);
+    }
+
+    void restore()
+    {
+        for (auto& [pid, before] : previous_) {
+            if (policy_) {
+                policy_->SetPersistedDefaultAudioEndpoint(pid, eRender, eMultimedia, before);
+                policy_->SetPersistedDefaultAudioEndpoint(pid, eRender, eConsole, before);
+            }
+            if (before) WindowsDeleteString(before);
+        }
+        previous_.clear();
+    }
+
+    bool active() const { return !previous_.empty(); }
+
+private:
+    ComPtr<IAudioPolicyConfigFactory> policy_;
+    std::map<DWORD, HSTRING> previous_;
+};
+
+// PKEY_Device_FriendlyName, spelled out so we don't depend on INITGUID include order.
+const PROPERTYKEY kDeviceFriendlyName = {{0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 14};
+
+std::wstring endpointIdOf(IMMDevice* device)
+{
+    LPWSTR id = nullptr;
+    std::wstring out;
+    if (SUCCEEDED(device->GetId(&id)) && id) {
+        out = id;
+        CoTaskMemFree(id);
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------------------------------------
 class WasapiAppSource final : public AppSource {
 public:
-    WasapiAppSource(std::string exeName, uint32_t sampleRate)
+    WasapiAppSource(std::string exeName, uint32_t sampleRate, std::string silentOutputId)
         : exeName_(std::move(exeName))
         , exeWide_(toWide(exeName_))
+        , silentOutputId_(toWide(silentOutputId))
         , sampleRate_(sampleRate)
         , ring_(sampleRate / 4) // 250 ms of headroom
         , targetLatency_(sampleRate / 50) // 20 ms
@@ -193,6 +337,7 @@ public:
         std::lock_guard<std::mutex> lock(errorMutex_);
         return error_;
     }
+    bool isRerouted() const override { return rerouted_.load(std::memory_order_relaxed); }
 
 private:
     void setError(std::string text)
@@ -216,6 +361,8 @@ private:
             // Poll for the app (re)starting. Cheap: one process snapshot per second.
             if (WaitForSingleObject(stopEvent_, 1000) == WAIT_OBJECT_0) break;
         }
+        router_.restore(); // the app plays on its own output again once the channel is gone
+        rerouted_ = false;
         if (mmcss) AvRevertMmThreadCharacteristics(mmcss);
     }
 
@@ -269,6 +416,10 @@ private:
         }
         state_ = State::Capturing;
         setError({});
+        // Only now that capture works: park the app's own output so it is heard once, via the mixer.
+        router_.route(exeWide_, silentOutputId_);
+        rerouted_ = router_.active();
+        DWORD lastRouteCheck = GetTickCount();
 
         HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
         const HANDLE waits[3] = {stopEvent_, packetEvent, process};
@@ -280,6 +431,11 @@ private:
             }
             if (r == WAIT_FAILED) {
                 break;
+            }
+            // Browsers and Discord start new audio processes on the fly; move those too.
+            if (!silentOutputId_.empty() && GetTickCount() - lastRouteCheck > 2000) {
+                router_.route(exeWide_, silentOutputId_);
+                lastRouteCheck = GetTickCount();
             }
             UINT32 packetFrames = 0;
             while (SUCCEEDED(captureClient->GetNextPacketSize(&packetFrames)) && packetFrames > 0) {
@@ -311,6 +467,9 @@ private:
 
     std::string exeName_;
     std::wstring exeWide_;
+    std::wstring silentOutputId_;
+    AppRouter router_; // capture thread only
+    std::atomic<bool> rerouted_{false};
     uint32_t sampleRate_;
     StereoRingBuffer ring_;
     uint32_t targetLatency_;
@@ -379,13 +538,70 @@ std::vector<AudioAppInfo> listAudioApps()
     return apps;
 }
 
-std::unique_ptr<AppSource> openAppCapture(const std::string& exeName, uint32_t sampleRate, std::string* error)
+void resetAllAppOutputs()
+{
+    ComScope com;
+    if (auto policy = createPolicyConfig()) {
+        policy->ClearAllPersistedApplicationDefaultEndpoints();
+    }
+}
+
+std::vector<OutputDeviceInfo> listOutputDevices()
+{
+    std::vector<OutputDeviceInfo> out;
+    ComScope com;
+    ComPtr<IMMDeviceEnumerator> enumerator;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator)))) {
+        return out;
+    }
+    std::wstring defaultId;
+    ComPtr<IMMDevice> defaultDevice;
+    if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &defaultDevice))) {
+        defaultId = endpointIdOf(defaultDevice.Get());
+    }
+    ComPtr<IMMDeviceCollection> devices;
+    if (FAILED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices))) {
+        return out;
+    }
+    UINT count = 0;
+    devices->GetCount(&count);
+    for (UINT i = 0; i < count; ++i) {
+        ComPtr<IMMDevice> device;
+        if (FAILED(devices->Item(i, &device))) continue;
+        OutputDeviceInfo info;
+        const std::wstring id = endpointIdOf(device.Get());
+        info.id = toUtf8(id);
+        info.isDefault = id == defaultId;
+        ComPtr<IPropertyStore> props;
+        PROPVARIANT name;
+        PropVariantInit(&name);
+        if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &props)) && SUCCEEDED(props->GetValue(kDeviceFriendlyName, &name))
+            && name.vt == VT_LPWSTR) {
+            info.name = toUtf8(name.pwszVal);
+        }
+        PropVariantClear(&name);
+        if (info.name.empty()) info.name = info.id;
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
+std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>& devices)
+{
+    for (const OutputDeviceInfo& d : devices) {
+        if (!d.isDefault) return d.id;
+    }
+    return {};
+}
+
+std::unique_ptr<AppSource> openAppCapture(const std::string& exeName, uint32_t sampleRate,
+                                          const std::string& silentOutputId, std::string* error)
 {
     if (exeName.empty()) {
         if (error) *error = "No app selected";
         return nullptr;
     }
-    return std::make_unique<WasapiAppSource>(exeName, sampleRate);
+    return std::make_unique<WasapiAppSource>(exeName, sampleRate, silentOutputId);
 }
 
 } // namespace psm

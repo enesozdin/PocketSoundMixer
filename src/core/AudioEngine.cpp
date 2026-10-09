@@ -425,9 +425,9 @@ std::unique_ptr<InputSource> AudioEngine::openInput(const std::string& deviceNam
     return src;
 }
 
-std::unique_ptr<AppSource> AudioEngine::openApp(const std::string& exeName, std::string* error)
+std::unique_ptr<AppSource> AudioEngine::openApp(const std::string& exeName, const std::string& silentOutputId, std::string* error)
 {
-    return openAppCapture(exeName, sampleRate(), error);
+    return openAppCapture(exeName, sampleRate(), silentOutputId, error);
 }
 
 } // namespace psm

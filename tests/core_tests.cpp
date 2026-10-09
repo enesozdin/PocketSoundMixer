@@ -13,6 +13,7 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <atomic>
 #include <vector>
 
 namespace {
@@ -181,6 +182,24 @@ void testRemoveIsDeferredUntilAudioThreadMovesOn()
     mixer.collectGarbage();
     CHECK(destroyed);
     CHECK_NEAR(out[100], 0.0f, 1e-9f);
+
+    // flushGarbage waits for the audio thread instead of leaving the object for a later frame.
+    bool flushed = false;
+    psm::Channel* b = mixer.addChannel("B");
+    mixer.replaceSource(b, std::make_unique<ConstSource>(0.5f, &flushed));
+    std::atomic<bool> running{true};
+    std::thread audio([&] {
+        std::vector<float> buf(64 * 2);
+        while (running) {
+            mixer.process(buf.data(), 64);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    mixer.replaceSource(b, nullptr);
+    mixer.flushGarbage(1000);
+    CHECK(flushed);
+    running = false;
+    audio.join();
 }
 
 void testChannelLimit()

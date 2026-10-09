@@ -109,6 +109,8 @@ void MixerUI::applySession(const SessionConfig& session)
         removeStrip(strips_.size() - 1);
     }
     engine_.mixer().masterVolume = session.masterVolume;
+    appAutoRoute_ = session.appAutoRoute;
+    appSilentOutput_ = session.appSilentOutput;
     masterVolumeDb_ = linearToFaderDb(session.masterVolume);
 
     for (const ChannelConfig& c : session.channels) {
@@ -145,6 +147,8 @@ SessionConfig MixerUI::captureSession() const
 {
     SessionConfig session;
     session.masterVolume = engine_.mixer().masterVolume.load();
+    session.appAutoRoute = appAutoRoute_;
+    session.appSilentOutput = appSilentOutput_;
     for (const Strip& s : strips_) {
         const Channel& ch = *s.channel;
         ChannelConfig c;
@@ -226,14 +230,98 @@ void MixerUI::loadInput(Strip& strip, const std::string& deviceName)
 
 void MixerUI::loadApp(Strip& strip, const std::string& exeName)
 {
+    if (AudioSource* old = strip.channel->source(); old && old->kind() == SourceKind::App) {
+        engine_.mixer().replaceSource(strip.channel, nullptr);
+        engine_.mixer().flushGarbage(200); // same reason as in reopenAppChannels()
+    }
     std::string err;
-    std::unique_ptr<AppSource> src = engine_.openApp(exeName, &err);
+    std::unique_ptr<AppSource> src = engine_.openApp(exeName, silentOutputId(), &err);
     if (!src) {
         strip.error = err;
         return;
     }
     engine_.mixer().replaceSource(strip.channel, std::move(src));
     strip.error.clear();
+}
+
+std::string MixerUI::silentOutputId()
+{
+    if (!appAutoRoute_) return {};
+    if (outputDevices_.empty()) outputDevices_ = listOutputDevices();
+    if (!appSilentOutput_.empty()) {
+        for (const OutputDeviceInfo& d : outputDevices_) {
+            if (d.name == appSilentOutput_ && !d.isDefault) return d.id;
+        }
+    }
+    return pickSilentOutputId(outputDevices_);
+}
+
+void MixerUI::reopenAppChannels()
+{
+    // Routing settings changed: restart app channels so they pick up the new setting.
+    // Destroying the old source restores the app's output first.
+    for (Strip& s : strips_) {
+        if (AudioSource* src = s.channel->source(); src && src->kind() == SourceKind::App) {
+            const std::string exe = static_cast<AppSource*>(src)->exeName();
+            engine_.mixer().replaceSource(s.channel, nullptr);
+            // The old capture must put the app's output back before the new one reads it,
+            // or the new one would remember the parked device as the app's own setting.
+            engine_.mixer().flushGarbage(200);
+            loadApp(s, exe);
+        }
+    }
+}
+
+void MixerUI::drawAppRoutingSettings()
+{
+    if (ImGui::Checkbox("Hear apps only through the mixer", &appAutoRoute_)) {
+        reopenAppChannels();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Moves the app's own sound to a spare output while it is in a channel,\n"
+                          "so you don't hear it twice. Put back when the channel is removed.");
+    }
+    if (!appAutoRoute_) {
+        if (ImGui::Button("Open Windows sound settings")) openAppVolumeSettings();
+        return;
+    }
+    const std::string current = silentOutputId();
+    if (current.empty()) {
+        ImGui::PushTextWrapPos(380.0f);
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+                           "This PC has only one output device, so captured apps also play directly. "
+                           "Connect a second output (a monitor with audio, a USB headset) or install the free VB-Cable driver.");
+        ImGui::PopTextWrapPos();
+        return;
+    }
+    std::string currentName;
+    for (const OutputDeviceInfo& d : outputDevices_) {
+        if (d.id == current) currentName = d.name;
+    }
+    ImGui::TextDisabled("Spare output for app sound:");
+    ImGui::SetNextItemWidth(320.0f);
+    const std::string label = appSilentOutput_.empty() ? "Automatic (" + currentName + ")" : currentName;
+    if (ImGui::BeginCombo("##silent", label.c_str())) {
+        if (ImGui::Selectable("Automatic", appSilentOutput_.empty())) {
+            appSilentOutput_.clear();
+            reopenAppChannels();
+        }
+        for (const OutputDeviceInfo& d : outputDevices_) {
+            if (d.isDefault) continue; // that's where the mixer plays
+            if (ImGui::Selectable(d.name.c_str(), d.name == appSilentOutput_)) {
+                appSilentOutput_ = d.name;
+                reopenAppChannels();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (ImGui::SmallButton("Reset all app outputs")) {
+        resetAllAppOutputs();
+        reopenAppChannels();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Puts every app back on your normal output, like Windows' own Reset button.");
+    }
 }
 
 void MixerUI::applyPreset(Strip& strip, const Preset& preset)
@@ -508,7 +596,8 @@ void MixerUI::drawSourceRow(Strip& strip)
             const auto* app = static_cast<AppSource*>(src);
             switch (app->state()) {
             case AppSource::State::Capturing:
-                ImGui::TextDisabled("App: %s (capturing)", app->exeName().c_str());
+                ImGui::TextDisabled("App: %s (%s)", app->exeName().c_str(),
+                                    app->isRerouted() ? "only via mixer" : "capturing");
                 break;
             case AppSource::State::WaitingForApp:
                 ImGui::TextDisabled("App: %s (waiting for it to start)", app->exeName().c_str());
@@ -535,6 +624,7 @@ void MixerUI::drawSourceRow(Strip& strip)
         ImGui::SameLine();
         if (ImGui::Button("App...")) {
             audioApps_ = listAudioApps();
+            outputDevices_ = listOutputDevices();
             appExeBuf_[0] = '\0';
             ImGui::OpenPopup("app");
         }
@@ -575,13 +665,7 @@ void MixerUI::drawSourceRow(Strip& strip)
             ImGui::CloseCurrentPopup();
         }
         ImGui::Separator();
-        ImGui::PushTextWrapPos(380.0f);
-        ImGui::TextDisabled("The app keeps playing on your speakers too. To hear it only through the mixer, "
-                            "set the app's output to an unused device in Windows sound settings.");
-        ImGui::PopTextWrapPos();
-        if (ImGui::Button("Open Windows sound settings")) {
-            openAppVolumeSettings();
-        }
+        drawAppRoutingSettings();
         ImGui::EndPopup();
     }
     if (ImGui::BeginPopup("input")) {

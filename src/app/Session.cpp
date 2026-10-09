@@ -32,6 +32,8 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
     }
     SessionConfig s;
     s.masterVolume = std::clamp(j.value("master", 1.0f), 0.0f, 2.0f);
+    s.appAutoRoute = j.value("appAutoRoute", true);
+    s.appSilentOutput = j.value("appSilentOutput", std::string());
     for (const auto& c : j["channels"]) {
         if (!c.is_object()) continue;
         ChannelConfig cc;
@@ -64,6 +66,8 @@ bool saveSession(const std::filesystem::path& file, const SessionConfig& session
     nlohmann::json j;
     j["version"] = 1;
     j["master"] = session.masterVolume;
+    j["appAutoRoute"] = session.appAutoRoute;
+    j["appSilentOutput"] = session.appSilentOutput;
     j["channels"] = nlohmann::json::array();
     for (const ChannelConfig& c : session.channels) {
         j["channels"].push_back({

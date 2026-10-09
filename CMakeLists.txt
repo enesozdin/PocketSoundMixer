@@ -37,7 +37,7 @@ target_compile_definitions(psm_core PUBLIC
     MA_NO_ENCODING MA_NO_GENERATION MA_NO_ENGINE MA_NO_NODE_GRAPH)
 if(WIN32)
     # WASAPI per-app capture: COM, MMCSS thread priority, ActivateAudioInterfaceAsync.
-    target_link_libraries(psm_core PUBLIC ole32 avrt mmdevapi shell32)
+    target_link_libraries(psm_core PUBLIC ole32 avrt mmdevapi shell32 runtimeobject)
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(psm_core PUBLIC ${CMAKE_DL_LIBS} pthread m)
 elseif(APPLE)

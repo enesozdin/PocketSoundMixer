@@ -33,6 +33,9 @@ public:
     void removeChannel(Channel* channel);
     void replaceSource(Channel* channel, std::unique_ptr<AudioSource> source);
     void collectGarbage();                 // call once per UI frame
+    // Blocks (up to timeoutMs) until everything retired so far is freed. For the rare case where
+    // an old object's destructor must finish before its replacement starts.
+    void flushGarbage(int timeoutMs);
 
     const std::vector<Channel*>& channels() const { return order_; }
 

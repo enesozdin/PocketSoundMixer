@@ -53,10 +53,10 @@ UI thread (Dear ImGui)                      Audio thread (miniaudio callback)
 
 Click **App...** on a channel and pick an app that is playing sound, or type its exe name (for example `Spotify.exe`). The channel captures that app and its child processes through WASAPI process loopback. This needs Windows 11 or Windows 10 build 20348+, and no driver. If the app isn't running yet, the channel waits and connects when it starts. The choice is saved with the session.
 
-The app also keeps playing on its normal output. To hear it only through the mixer, open **App volume and device preferences** in Windows (there's a button in the App popup) and set that app's output to a device you don't listen to.
+With **Hear apps only through the mixer** on (the default), the mixer also moves the app's own output to a spare device you don't listen to, such as monitor/HDMI audio or the speakers while you use a headset. That way you hear the app only once, through its channel. It does this through the same Windows setting as "App volume and device preferences", and puts the app back when the channel is removed or the mixer closes. If the PC has only one output, the app plays directly as well. **Reset all app outputs** in the App popup puts every app back on the normal output.
 
 ## Roadmap
 
-1. Switch an app's output for you automatically, so you don't have to change it in Windows settings.
+1. Our own virtual audio driver, so every channel shows up as a Windows output device (like Sonar or Wave Link) and no spare device is needed.
 2. Per-app capture on macOS (Core Audio process taps, 14.2+) and Linux (PipeWire virtual sinks).
 3. A native file picker and channel reordering.

@@ -55,6 +55,9 @@ private:
     void loadFile(Strip& strip, const std::string& utf8Path, bool loop);
     void loadInput(Strip& strip, const std::string& deviceName);
     void loadApp(Strip& strip, const std::string& exeName);
+    std::string silentOutputId();
+    void reopenAppChannels();
+    void drawAppRoutingSettings();
     void applyPreset(Strip& strip, const Preset& preset);
     void updateCurve(Strip& strip);
     void savePresets();
@@ -73,6 +76,9 @@ private:
     std::vector<std::string> captureDevices_;
     std::vector<AudioAppInfo> audioApps_;
     std::array<char, 128> appExeBuf_{};
+    std::vector<OutputDeviceInfo> outputDevices_;
+    bool appAutoRoute_ = true;
+    std::string appSilentOutput_; // device name; empty = automatic
     std::string status_;
     float masterVolumeDb_ = 0.0f;
     float masterMeterDb_[2] = {-90.0f, -90.0f};
