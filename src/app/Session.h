@@ -17,10 +17,11 @@ struct ChannelConfig {
     float pan = 0.0f;
     bool mute = false;
     bool solo = false;
-    std::string sourceType = "none"; // "none" | "file" | "input"
+    std::string sourceType = "none"; // "none" | "file" | "input" | "app"
     std::string filePath;            // UTF-8
     bool loop = true;
     std::string inputDevice;         // empty = system default input
+    std::string appExe;              // e.g. "Spotify.exe"
 };
 
 struct SessionConfig {

@@ -52,6 +52,7 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
         cc.filePath = c.value("file", std::string());
         cc.loop = c.value("loop", true);
         cc.inputDevice = c.value("input", std::string());
+        cc.appExe = c.value("app", std::string());
         s.channels.push_back(std::move(cc));
     }
     out = std::move(s);
@@ -68,7 +69,7 @@ bool saveSession(const std::filesystem::path& file, const SessionConfig& session
         j["channels"].push_back({
             {"name", c.name}, {"preset", c.preset}, {"gains", c.gainsDb},
             {"volume", c.volume}, {"pan", c.pan}, {"mute", c.mute}, {"solo", c.solo},
-            {"source", c.sourceType}, {"file", c.filePath}, {"loop", c.loop}, {"input", c.inputDevice},
+            {"source", c.sourceType}, {"file", c.filePath}, {"loop", c.loop}, {"input", c.inputDevice}, {"app", c.appExe},
         });
     }
     std::error_code ec;

@@ -33,6 +33,7 @@ public:
     std::vector<std::string> captureDeviceNames(); // refreshes the device list
     std::unique_ptr<FileSource> openFile(const std::string& utf8Path, std::string* error);
     std::unique_ptr<InputSource> openInput(const std::string& deviceName, std::string* error);
+    std::unique_ptr<AppSource> openApp(const std::string& exeName, std::string* error); // Windows only
 
 private:
     struct Impl;

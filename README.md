@@ -7,7 +7,7 @@ A lightweight desktop sound mixer for Windows, macOS and Linux. You can add or r
 - **Dynamic channels**: add or remove up to 64. The first launch starts with Music, Game, Film, Chat and Podcast.
 - **10-band graphic EQ per channel** at 31 Hz to 16 kHz, ±12 dB. Double-click a slider to reset it.
 - **Presets**: 10 built-in ones (Flat, Bass Boost, Treble Boost, Vocal, Loudness, Music, Game, Film, Chat, Podcast) plus as many of your own as you want. Use **Save** on a channel to create one and the **Presets** window to rename or delete.
-- **Sources per channel**: an audio file (WAV, MP3 or FLAC, with play, pause, loop and seek) or a live input (mic, line-in or audio interface). Drag a file onto a channel to load it. Dropping a file anywhere else creates a new channel.
+- **Sources per channel**: an audio file (WAV, MP3 or FLAC, with play, pause, loop and seek), a live input (mic, line-in or audio interface), or **an app** on Windows (Spotify, a game, Discord...). Drag a file onto a channel to load it. Dropping a file anywhere else creates a new channel.
 - Volume, balance, mute, solo and peak meters on each channel, plus a master fader.
 - The channel layout is saved on exit and restored on the next launch.
 
@@ -49,8 +49,14 @@ UI thread (Dear ImGui)                      Audio thread (miniaudio callback)
   - `Presets`: built-in presets plus user presets stored as JSON.
 - `src/app`: the GLFW + OpenGL3 + Dear ImGui front end. The app sleeps in `glfwWaitEventsTimeout` and only redraws at about 30 fps while meters are moving.
 
+## Per-app channels (Windows)
+
+Click **App...** on a channel and pick an app that is playing sound, or type its exe name (for example `Spotify.exe`). The channel captures that app and its child processes through WASAPI process loopback. This needs Windows 11 or Windows 10 build 20348+, and no driver. If the app isn't running yet, the channel waits and connects when it starts. The choice is saved with the session.
+
+The app also keeps playing on its normal output. To hear it only through the mixer, open **App volume and device preferences** in Windows (there's a button in the App popup) and set that app's output to a device you don't listen to.
+
 ## Roadmap
 
-1. **Per-app capture on Windows** (top priority): route apps such as Spotify, games and Discord into the Music, Game and Chat channels, using WASAPI process loopback (Windows 10 2004+).
+1. Switch an app's output for you automatically, so you don't have to change it in Windows settings.
 2. Per-app capture on macOS (Core Audio process taps, 14.2+) and Linux (PipeWire virtual sinks).
 3. A native file picker and channel reordering.

@@ -135,6 +135,8 @@ void MixerUI::applySession(const SessionConfig& session)
             loadFile(*s, c.filePath, c.loop);
         } else if (c.sourceType == "input") {
             loadInput(*s, c.inputDevice);
+        } else if (c.sourceType == "app" && !c.appExe.empty()) {
+            loadApp(*s, c.appExe);
         }
     }
 }
@@ -163,6 +165,9 @@ SessionConfig MixerUI::captureSession() const
                 const auto* in = static_cast<const InputSource*>(src);
                 c.sourceType = "input";
                 c.inputDevice = in->deviceName() == "Default input" ? "" : in->deviceName();
+            } else if (src->kind() == SourceKind::App) {
+                c.sourceType = "app";
+                c.appExe = static_cast<const AppSource*>(src)->exeName();
             }
         }
         session.channels.push_back(std::move(c));
@@ -211,6 +216,18 @@ void MixerUI::loadInput(Strip& strip, const std::string& deviceName)
 {
     std::string err;
     std::unique_ptr<InputSource> src = engine_.openInput(deviceName, &err);
+    if (!src) {
+        strip.error = err;
+        return;
+    }
+    engine_.mixer().replaceSource(strip.channel, std::move(src));
+    strip.error.clear();
+}
+
+void MixerUI::loadApp(Strip& strip, const std::string& exeName)
+{
+    std::string err;
+    std::unique_ptr<AppSource> src = engine_.openApp(exeName, &err);
     if (!src) {
         strip.error = err;
         return;
@@ -487,6 +504,19 @@ void MixerUI::drawSourceRow(Strip& strip)
     } else {
         if (src && src->kind() == SourceKind::Input) {
             ImGui::TextDisabled("Live input: %s", static_cast<InputSource*>(src)->deviceName().c_str());
+        } else if (src && src->kind() == SourceKind::App) {
+            const auto* app = static_cast<AppSource*>(src);
+            switch (app->state()) {
+            case AppSource::State::Capturing:
+                ImGui::TextDisabled("App: %s (capturing)", app->exeName().c_str());
+                break;
+            case AppSource::State::WaitingForApp:
+                ImGui::TextDisabled("App: %s (waiting for it to start)", app->exeName().c_str());
+                break;
+            case AppSource::State::Failed:
+                ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "App: %s", app->lastError().c_str());
+                break;
+            }
         } else {
             ImGui::TextDisabled("No source. Drop an audio file here.");
         }
@@ -500,6 +530,14 @@ void MixerUI::drawSourceRow(Strip& strip)
     if (ImGui::Button("Input...")) {
         captureDevices_ = engine_.captureDeviceNames();
         ImGui::OpenPopup("input");
+    }
+    if (appCaptureSupported()) {
+        ImGui::SameLine();
+        if (ImGui::Button("App...")) {
+            audioApps_ = listAudioApps();
+            appExeBuf_[0] = '\0';
+            ImGui::OpenPopup("app");
+        }
     }
     if (src) {
         ImGui::SameLine();
@@ -515,6 +553,34 @@ void MixerUI::drawSourceRow(Strip& strip)
         if (ImGui::Button("Load") || enter) {
             loadFile(strip, strip.pathBuf.data(), true);
             ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    if (ImGui::BeginPopup("app")) {
+        ImGui::TextUnformatted("Apps playing sound now:");
+        for (const AudioAppInfo& app : audioApps_) {
+            if (ImGui::Selectable(app.displayName.c_str())) {
+                loadApp(strip, app.exeName);
+            }
+        }
+        if (audioApps_.empty()) {
+            ImGui::TextDisabled("None right now. Start playing something, or type the exe name:");
+        }
+        ImGui::SetNextItemWidth(220.0f);
+        const bool enter = ImGui::InputTextWithHint("##exe", "e.g. Spotify.exe", appExeBuf_.data(), appExeBuf_.size(),
+                                                    ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        if ((ImGui::Button("Use") || enter) && appExeBuf_[0] != '\0') {
+            loadApp(strip, appExeBuf_.data());
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::Separator();
+        ImGui::PushTextWrapPos(380.0f);
+        ImGui::TextDisabled("The app keeps playing on your speakers too. To hear it only through the mixer, "
+                            "set the app's output to an unused device in Windows sound settings.");
+        ImGui::PopTextWrapPos();
+        if (ImGui::Button("Open Windows sound settings")) {
+            openAppVolumeSettings();
         }
         ImGui::EndPopup();
     }
