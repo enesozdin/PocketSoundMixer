@@ -1,7 +1,9 @@
 #include "Mixer.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <thread>
 
 namespace psm {
 
@@ -68,6 +70,16 @@ void Mixer::collectGarbage()
     graveyard_.erase(std::remove_if(graveyard_.begin(), graveyard_.end(),
                                     [now](const Retired& r) { return now >= r.epoch; }),
                      graveyard_.end());
+}
+
+void Mixer::flushGarbage(int timeoutMs)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    collectGarbage();
+    while (!graveyard_.empty() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2)); // ~1 audio callback
+        collectGarbage();
+    }
 }
 
 void Mixer::process(float* out, uint32_t frames)

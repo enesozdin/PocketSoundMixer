@@ -32,6 +32,8 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
     }
     SessionConfig s;
     s.masterVolume = std::clamp(j.value("master", 1.0f), 0.0f, 2.0f);
+    s.appAutoRoute = j.value("appAutoRoute", true);
+    s.appSilentOutput = j.value("appSilentOutput", std::string());
     for (const auto& c : j["channels"]) {
         if (!c.is_object()) continue;
         ChannelConfig cc;
@@ -52,6 +54,7 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
         cc.filePath = c.value("file", std::string());
         cc.loop = c.value("loop", true);
         cc.inputDevice = c.value("input", std::string());
+        cc.appExe = c.value("app", std::string());
         s.channels.push_back(std::move(cc));
     }
     out = std::move(s);
@@ -63,12 +66,14 @@ bool saveSession(const std::filesystem::path& file, const SessionConfig& session
     nlohmann::json j;
     j["version"] = 1;
     j["master"] = session.masterVolume;
+    j["appAutoRoute"] = session.appAutoRoute;
+    j["appSilentOutput"] = session.appSilentOutput;
     j["channels"] = nlohmann::json::array();
     for (const ChannelConfig& c : session.channels) {
         j["channels"].push_back({
             {"name", c.name}, {"preset", c.preset}, {"gains", c.gainsDb},
             {"volume", c.volume}, {"pan", c.pan}, {"mute", c.mute}, {"solo", c.solo},
-            {"source", c.sourceType}, {"file", c.filePath}, {"loop", c.loop}, {"input", c.inputDevice},
+            {"source", c.sourceType}, {"file", c.filePath}, {"loop", c.loop}, {"input", c.inputDevice}, {"app", c.appExe},
         });
     }
     std::error_code ec;

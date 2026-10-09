@@ -22,6 +22,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 
 # ---- Core: audio engine, EQ, mixer, presets. No UI dependencies. ----
 add_library(psm_core STATIC
+    src/core/AppCapture.cpp
     src/core/AudioEngine.cpp
     src/core/Channel.cpp
     src/core/GraphicEq.cpp
@@ -34,7 +35,10 @@ target_link_libraries(psm_core PUBLIC nlohmann_json::nlohmann_json)
 # Strip miniaudio features we never use: smaller binary, faster compile.
 target_compile_definitions(psm_core PUBLIC
     MA_NO_ENCODING MA_NO_GENERATION MA_NO_ENGINE MA_NO_NODE_GRAPH)
-if(UNIX AND NOT APPLE)
+if(WIN32)
+    # WASAPI per-app capture: COM, MMCSS thread priority, ActivateAudioInterfaceAsync.
+    target_link_libraries(psm_core PUBLIC ole32 avrt mmdevapi shell32 runtimeobject)
+elseif(UNIX AND NOT APPLE)
     target_link_libraries(psm_core PUBLIC ${CMAKE_DL_LIBS} pthread m)
 elseif(APPLE)
     target_link_libraries(psm_core PUBLIC "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox")

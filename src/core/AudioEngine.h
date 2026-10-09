@@ -33,6 +33,8 @@ public:
     std::vector<std::string> captureDeviceNames(); // refreshes the device list
     std::unique_ptr<FileSource> openFile(const std::string& utf8Path, std::string* error);
     std::unique_ptr<InputSource> openInput(const std::string& deviceName, std::string* error);
+    // Windows only. `silentOutputId`: where the app's own output is parked while captured (empty = leave it).
+    std::unique_ptr<AppSource> openApp(const std::string& exeName, const std::string& silentOutputId, std::string* error);
 
 private:
     struct Impl;

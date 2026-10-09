@@ -1,5 +1,7 @@
 #include "AudioEngine.h"
 
+#include "AppCapture.h"
+
 #include "miniaudio.h"
 
 #include <algorithm>
@@ -421,6 +423,11 @@ std::unique_ptr<InputSource> AudioEngine::openInput(const std::string& deviceNam
         return nullptr;
     }
     return src;
+}
+
+std::unique_ptr<AppSource> AudioEngine::openApp(const std::string& exeName, const std::string& silentOutputId, std::string* error)
+{
+    return openAppCapture(exeName, sampleRate(), silentOutputId, error);
 }
 
 } // namespace psm

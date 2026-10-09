@@ -13,7 +13,7 @@ public:
     virtual ~Retirable() = default;
 };
 
-enum class SourceKind : uint8_t { File, Input, Other };
+enum class SourceKind : uint8_t { File, Input, App, Other };
 
 // A stereo float producer pulled by the audio thread.
 class AudioSource : public Retirable {
@@ -45,6 +45,21 @@ class InputSource : public AudioSource {
 public:
     SourceKind kind() const override { return SourceKind::Input; }
     virtual const std::string& deviceName() const = 0;
+};
+
+// Captures the sound of one application (and its child processes), e.g. Spotify or a game.
+// Windows only for now (WASAPI process loopback). If the app is not running, the source
+// waits and attaches by itself once it starts.
+class AppSource : public AudioSource {
+public:
+    enum class State : uint8_t { WaitingForApp, Capturing, Failed };
+
+    SourceKind kind() const override { return SourceKind::App; }
+    virtual const std::string& exeName() const = 0; // e.g. "Spotify.exe"
+    virtual State state() const = 0;
+    virtual std::string lastError() const = 0;      // UI thread
+    // True while the app's own output is moved to the silent device (so it is heard only via the mixer).
+    virtual bool isRerouted() const = 0;
 };
 
 } // namespace psm

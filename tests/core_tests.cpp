@@ -3,6 +3,7 @@
 #include "GraphicEq.h"
 #include "Mixer.h"
 #include "Presets.h"
+#include "StereoRingBuffer.h"
 
 #include <cmath>
 #include <cstdio>
@@ -12,6 +13,7 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <atomic>
 #include <vector>
 
 namespace {
@@ -180,6 +182,24 @@ void testRemoveIsDeferredUntilAudioThreadMovesOn()
     mixer.collectGarbage();
     CHECK(destroyed);
     CHECK_NEAR(out[100], 0.0f, 1e-9f);
+
+    // flushGarbage waits for the audio thread instead of leaving the object for a later frame.
+    bool flushed = false;
+    psm::Channel* b = mixer.addChannel("B");
+    mixer.replaceSource(b, std::make_unique<ConstSource>(0.5f, &flushed));
+    std::atomic<bool> running{true};
+    std::thread audio([&] {
+        std::vector<float> buf(64 * 2);
+        while (running) {
+            mixer.process(buf.data(), 64);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    mixer.replaceSource(b, nullptr);
+    mixer.flushGarbage(1000);
+    CHECK(flushed);
+    running = false;
+    audio.join();
 }
 
 void testChannelLimit()
@@ -274,6 +294,46 @@ void testFilePlaybackStreamsAndStops()
     std::filesystem::remove(file);
 }
 
+void testRingBuffer()
+{
+    psm::StereoRingBuffer rb(100);
+    CHECK(rb.capacity() == 128);
+
+    // Wraps around the end correctly.
+    std::vector<float> in(2 * 100), out(2 * 100);
+    float next = 0.0f;
+    float expect = 0.0f;
+    bool ordered = true;
+    for (int round = 0; round < 10; ++round) {
+        for (auto& v : in) v = next++;
+        CHECK(rb.write(in.data(), 70) == 70);
+        CHECK(rb.read(out.data(), 70, 0, 1000) == 70);
+        for (int i = 0; i < 140; ++i) {
+            ordered &= out[i] == expect++;
+        }
+        next = expect;
+    }
+    CHECK(ordered);
+
+    // Full buffer drops instead of overwriting.
+    CHECK(rb.write(in.data(), 100) == 100);
+    CHECK(rb.write(in.data(), 100) == 28);
+    CHECK(rb.available() == 128);
+
+    // A large backlog is trimmed to the target latency.
+    std::vector<float> small(2 * 16);
+    CHECK(rb.read(small.data(), 16, 32, 64) == 16);
+    CHECK(rb.available() == 32);
+
+    // Underrun zero-fills.
+    psm::StereoRingBuffer empty(64);
+    small.assign(small.size(), 1.0f);
+    CHECK(empty.read(small.data(), 16, 0, 64) == 0);
+    CHECK(small[0] == 0.0f && small[31] == 0.0f);
+    CHECK(empty.writeSilence(8) == 8);
+    CHECK(empty.available() == 8);
+}
+
 } // namespace
 
 int main()
@@ -285,6 +345,7 @@ int main()
     testRemoveIsDeferredUntilAudioThreadMovesOn();
     testChannelLimit();
     testPresetLibrary();
+    testRingBuffer();
     testFilePlaybackStreamsAndStops();
     if (g_failures == 0) {
         std::printf("All core tests passed\n");
