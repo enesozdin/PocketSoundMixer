@@ -9,7 +9,7 @@ namespace psm {
 
 Mixer::Mixer(float sampleRate)
     : sampleRate_(sampleRate)
-    , scratch_(static_cast<size_t>(kMaxBlockFrames) * 2, 0.0f)
+    , scratch_(static_cast<size_t>(kMaxBlockFrames) * 4, 0.0f)
 {
     for (auto& s : slots_) {
         s.store(nullptr, std::memory_order_relaxed);
@@ -50,10 +50,25 @@ void Mixer::removeChannel(Channel* channel)
     }
 }
 
-void Mixer::replaceSource(Channel* channel, std::unique_ptr<AudioSource> source)
+bool Mixer::addSource(Channel* channel, std::unique_ptr<AudioSource> source)
 {
-    if (auto old = channel->exchangeSource(std::move(source))) {
+    const int slot = channel->freeSourceSlot();
+    if (slot < 0) return false;
+    replaceSource(channel, slot, std::move(source));
+    return true;
+}
+
+void Mixer::replaceSource(Channel* channel, int slot, std::unique_ptr<AudioSource> source)
+{
+    if (auto old = channel->exchangeSource(slot, std::move(source))) {
         retire(std::move(old));
+    }
+}
+
+void Mixer::clearSources(Channel* channel)
+{
+    for (int i = 0; i < Channel::kMaxSources; ++i) {
+        replaceSource(channel, i, nullptr);
     }
 }
 
@@ -85,6 +100,7 @@ void Mixer::flushGarbage(int timeoutMs)
 void Mixer::process(float* out, uint32_t frames)
 {
     float* scratch = scratch_.data();
+    float* temp = scratch + static_cast<size_t>(kMaxBlockFrames) * 2;
     uint32_t done = 0;
     while (done < frames) {
         const uint32_t n = std::min(kMaxBlockFrames, frames - done);
@@ -101,7 +117,7 @@ void Mixer::process(float* out, uint32_t frames)
         }
         for (const auto& slot : slots_) {
             if (Channel* c = slot.load(std::memory_order_acquire)) {
-                c->process(block, scratch, n, anySolo);
+                c->process(block, scratch, temp, n, anySolo);
             }
         }
 

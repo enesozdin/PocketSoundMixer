@@ -31,7 +31,10 @@ public:
     // ---- UI thread ----
     Channel* addChannel(std::string name); // nullptr when kMaxChannels is reached
     void removeChannel(Channel* channel);
-    void replaceSource(Channel* channel, std::unique_ptr<AudioSource> source);
+    // Puts `source` in the channel's first free slot. Returns false (and drops it) when all are taken.
+    bool addSource(Channel* channel, std::unique_ptr<AudioSource> source);
+    void replaceSource(Channel* channel, int slot, std::unique_ptr<AudioSource> source);
+    void clearSources(Channel* channel);
     void collectGarbage();                 // call once per UI frame
     // Blocks (up to timeoutMs) until everything retired so far is freed. For the rare case where
     // an old object's destructor must finish before its replacement starts.
@@ -63,7 +66,7 @@ private:
     std::atomic<float> masterPeak_[2] = {0.0f, 0.0f};
 
     // Audio thread state.
-    std::vector<float> scratch_;
+    std::vector<float> scratch_; // two blocks: channel sum + one source
     float currentMaster_ = 0.0f;
 };
 

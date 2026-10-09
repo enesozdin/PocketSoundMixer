@@ -3,13 +3,14 @@
 #include "AudioSource.h"
 #include "GraphicEq.h"
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <string>
 
 namespace psm {
 
-// One mixer strip: source -> 10-band EQ -> volume / balance -> mix bus.
+// One mixer strip: sources (summed) -> 10-band EQ -> volume / balance -> mix bus.
 // Parameters are atomics written by the UI thread and read by the audio thread.
 class Channel : public Retirable {
 public:
@@ -33,21 +34,26 @@ public:
     std::atomic<bool> solo{false};
 
     // Post-fader peak since the last call, then cleared. side: 0 = left, 1 = right.
+    // Measured even while muted, so a muted mic still shows that it hears you.
     float takePeak(int side) { return peak_[side].exchange(0.0f, std::memory_order_relaxed); }
 
-    AudioSource* source() const { return source_.load(std::memory_order_acquire); }
+    // Several apps (or a mic) can play into one channel; their sound is summed before the EQ.
+    static constexpr int kMaxSources = 8;
+    AudioSource* source(int slot) const { return sources_[slot].load(std::memory_order_acquire); }
+    int sourceCount() const;
+    int freeSourceSlot() const; // -1 when all slots are taken
     // Swaps in a new source and returns the old one, which the caller must retire through the Mixer.
-    std::unique_ptr<AudioSource> exchangeSource(std::unique_ptr<AudioSource> source);
+    std::unique_ptr<AudioSource> exchangeSource(int slot, std::unique_ptr<AudioSource> source);
 
     // ---- Audio thread ----
-    // Adds this channel's output to `mixBus`. `scratch` holds at least `frames` stereo frames.
-    void process(float* mixBus, float* scratch, uint32_t frames, bool anySolo);
+    // Adds this channel's output to `mixBus`. `scratch` and `temp` each hold at least `frames` stereo frames.
+    void process(float* mixBus, float* scratch, float* temp, uint32_t frames, bool anySolo);
 
 private:
     std::string name_;
     std::array<std::atomic<float>, kEqBands> gains_;
     std::atomic<uint32_t> gainsVersion_{1};
-    std::atomic<AudioSource*> source_{nullptr};
+    std::array<std::atomic<AudioSource*>, kMaxSources> sources_{};
     std::atomic<float> peak_[2] = {0.0f, 0.0f};
 
     // Audio thread state.

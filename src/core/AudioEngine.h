@@ -9,7 +9,7 @@
 
 namespace psm {
 
-// Owns the output device, the file streaming backend and the Mixer.
+// Owns the output device and the Mixer.
 // miniaudio stays hidden behind a pimpl so only one translation unit pays its compile cost.
 class AudioEngine {
 public:
@@ -19,19 +19,23 @@ public:
     AudioEngine(const AudioEngine&) = delete;
     AudioEngine& operator=(const AudioEngine&) = delete;
 
-    // Opens the default output device and starts the audio thread.
-    // On failure the Mixer still exists (at 48 kHz) so the UI keeps working.
-    bool start(std::string* error);
+    // Opens the output device and starts the audio thread. `outputDevice` empty = system default,
+    // which also follows Windows when the default changes. If the named device is gone, the
+    // default is used. On failure the Mixer still exists (at 48 kHz) so the UI keeps working.
+    bool start(const std::string& outputDevice, std::string* error);
     void stop();
     bool isRunning() const;
 
     Mixer& mixer();
     uint32_t sampleRate() const;
-    const std::string& outputDeviceName() const;
+    const std::string& outputDeviceName() const; // the device actually playing
+    const std::string& requestedOutput() const;  // empty = system default
 
     // UI thread.
+    std::vector<std::string> outputDeviceNames();  // refreshes the device list
+    // Moves the mixer to another output (empty = system default). Channels keep playing.
+    bool setOutputDevice(const std::string& name, std::string* error);
     std::vector<std::string> captureDeviceNames(); // refreshes the device list
-    std::unique_ptr<FileSource> openFile(const std::string& utf8Path, std::string* error);
     std::unique_ptr<InputSource> openInput(const std::string& deviceName, std::string* error);
     // Windows only. `silentOutputId`: where the app's own output is parked while captured (empty = leave it).
     std::unique_ptr<AppSource> openApp(const std::string& exeName, const std::string& silentOutputId, std::string* error);

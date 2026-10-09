@@ -16,21 +16,6 @@
 
 namespace {
 
-struct DropState {
-    psm::MixerUI* ui = nullptr;
-};
-
-void onDrop(GLFWwindow* window, int count, const char** paths)
-{
-    auto* state = static_cast<DropState*>(glfwGetWindowUserPointer(window));
-    if (!state || !state->ui) return;
-    double x = 0.0;
-    double y = 0.0;
-    glfwGetCursorPos(window, &x, &y);
-    std::vector<std::string> files(paths, paths + count);
-    state->ui->onFilesDropped(files, static_cast<float>(x), static_cast<float>(y));
-}
-
 void onGlfwError(int code, const char* text)
 {
     std::fprintf(stderr, "GLFW error %d: %s\n", code, text);
@@ -44,10 +29,16 @@ int main()
     const auto presetFile = configDir / "presets.json";
     const auto sessionFile = configDir / "session.json";
 
+    psm::SessionConfig session;
+    std::string sessionError;
+    if (!psm::loadSession(sessionFile, session, &sessionError)) {
+        session = psm::defaultSession();
+    }
+
     // Audio first: the Mixer's sample rate comes from the output device.
     psm::AudioEngine engine;
     std::string audioError;
-    engine.start(&audioError);
+    engine.start(session.outputDevice, &audioError);
 
     psm::PresetLibrary presets;
     std::string presetError;
@@ -97,19 +88,10 @@ int main()
     ImGui_ImplOpenGL3_Init(glslVersion);
 
     psm::MixerUI ui(engine, presets, presetFile);
-    psm::SessionConfig session;
-    std::string sessionError;
-    if (!psm::loadSession(sessionFile, session, &sessionError)) {
-        session = psm::defaultSession();
-    }
     ui.applySession(session);
     if (!audioError.empty()) ui.setStatus(audioError);
     else if (!presetError.empty()) ui.setStatus(presetError);
     else if (!sessionError.empty()) ui.setStatus(sessionError);
-
-    DropState dropState{&ui};
-    glfwSetWindowUserPointer(window, &dropState);
-    glfwSetDropCallback(window, onDrop);
 
     double lastTime = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {

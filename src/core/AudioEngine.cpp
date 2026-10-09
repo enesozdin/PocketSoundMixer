@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
-#include <filesystem>
 
 #if defined(__SSE__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
     #include <xmmintrin.h>
@@ -33,95 +32,6 @@ std::string resultText(ma_result r)
 {
     return ma_result_description(r);
 }
-
-// ---------------------------------------------------------------------------------------------
-// File playback. The resource manager decodes into pages on its own job thread, already
-// converted to f32 stereo at the device rate, so read() only copies.
-class FileSourceImpl final : public FileSource {
-public:
-    ~FileSourceImpl() override
-    {
-        if (initialized_) {
-            ma_resource_manager_data_source_uninit(&ds_);
-        }
-    }
-
-    bool init(ma_resource_manager* rm, const std::string& utf8Path, std::string* error)
-    {
-        path_ = utf8Path;
-        const ma_uint32 flags = MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_STREAM;
-#if defined(_WIN32)
-        // The char* API is not UTF-8 safe on Windows; go through wide strings.
-        const std::filesystem::path p(std::u8string(reinterpret_cast<const char8_t*>(utf8Path.data()), utf8Path.size()));
-        const ma_result r = ma_resource_manager_data_source_init_w(rm, p.wstring().c_str(), flags, nullptr, &ds_);
-#else
-        const ma_result r = ma_resource_manager_data_source_init(rm, utf8Path.c_str(), flags, nullptr, &ds_);
-#endif
-        if (r != MA_SUCCESS) {
-            if (error) {
-                *error = "Cannot open \"" + utf8Path + "\": " + resultText(r);
-            }
-            return false;
-        }
-        initialized_ = true;
-        ma_uint64 length = 0;
-        if (ma_data_source_get_length_in_pcm_frames(&ds_, &length) == MA_SUCCESS) {
-            length_ = length;
-        }
-        return true;
-    }
-
-    void read(float* out, uint32_t frames) override
-    {
-        const int64_t seek = seekRequest_.exchange(-1, std::memory_order_acq_rel);
-        if (seek >= 0) {
-            ma_data_source_seek_to_pcm_frame(&ds_, static_cast<ma_uint64>(seek));
-        }
-        const bool loop = looping_.load(std::memory_order_relaxed);
-        if (loop != appliedLooping_) {
-            ma_data_source_set_looping(&ds_, loop ? MA_TRUE : MA_FALSE);
-            appliedLooping_ = loop;
-        }
-
-        ma_uint64 framesRead = 0;
-        ma_result r = MA_SUCCESS;
-        if (playing_.load(std::memory_order_relaxed)) {
-            // MA_BUSY means the next page is not decoded yet; we simply output silence for it.
-            r = ma_data_source_read_pcm_frames(&ds_, out, frames, &framesRead);
-        }
-        if (framesRead < frames) {
-            std::memset(out + framesRead * 2, 0, (frames - framesRead) * 2 * sizeof(float));
-        }
-        if (r == MA_AT_END && !loop) {
-            playing_.store(false, std::memory_order_relaxed);
-            ma_data_source_seek_to_pcm_frame(&ds_, 0);
-        }
-        ma_uint64 cursor = 0;
-        if (ma_data_source_get_cursor_in_pcm_frames(&ds_, &cursor) == MA_SUCCESS) {
-            cursor_.store(cursor, std::memory_order_relaxed);
-        }
-    }
-
-    const std::string& path() const override { return path_; }
-    bool isPlaying() const override { return playing_.load(std::memory_order_relaxed); }
-    void setPlaying(bool playing) override { playing_.store(playing, std::memory_order_relaxed); }
-    bool isLooping() const override { return looping_.load(std::memory_order_relaxed); }
-    void setLooping(bool looping) override { looping_.store(looping, std::memory_order_relaxed); }
-    uint64_t lengthFrames() const override { return length_; }
-    uint64_t cursorFrames() const override { return cursor_.load(std::memory_order_relaxed); }
-    void requestSeek(uint64_t frame) override { seekRequest_.store(static_cast<int64_t>(frame), std::memory_order_release); }
-
-private:
-    ma_resource_manager_data_source ds_{};
-    bool initialized_ = false;
-    std::string path_;
-    uint64_t length_ = 0;
-    std::atomic<bool> playing_{true};
-    std::atomic<bool> looping_{true};
-    bool appliedLooping_ = false;
-    std::atomic<uint64_t> cursor_{0};
-    std::atomic<int64_t> seekRequest_{-1};
-};
 
 // ---------------------------------------------------------------------------------------------
 // Live capture. The capture device callback writes into a lock-free ring buffer that the
@@ -229,18 +139,64 @@ private:
 struct AudioEngine::Impl {
     ma_context context{};
     ma_device device{};
-    ma_resource_manager resourceManager{};
     bool contextReady = false;
     bool deviceReady = false;
-    bool resourceManagerReady = false;
     bool running = false;
     bool denormalsSet = false;
     std::string outputName = "No output device";
+    std::string requestedOutput; // empty = system default
     std::unique_ptr<Mixer> mixer;
+    std::vector<ma_device_info> playbackDevices;
     std::vector<ma_device_info> captureDevices;
-    // Sources whose open failed. miniaudio's job thread can still touch them briefly after
-    // a failed stream init returns, so they are freed only after the job thread is gone.
-    std::vector<std::unique_ptr<FileSource>> failedOpens;
+
+    void refreshDevices()
+    {
+        playbackDevices.clear();
+        captureDevices.clear();
+        if (!contextReady) return;
+        ma_device_info* playback = nullptr;
+        ma_device_info* capture = nullptr;
+        ma_uint32 playbackCount = 0;
+        ma_uint32 captureCount = 0;
+        if (ma_context_get_devices(&context, &playback, &playbackCount, &capture, &captureCount) == MA_SUCCESS) {
+            playbackDevices.assign(playback, playback + playbackCount);
+            captureDevices.assign(capture, capture + captureCount);
+        }
+    }
+
+    // `sampleRate` 0 = the device's native rate (first start). Later opens keep the Mixer's
+    // rate; miniaudio resamples only if the new device runs at a different one.
+    ma_result openDevice(const std::string& name, uint32_t sampleRate)
+    {
+        const ma_device_id* id = nullptr;
+        if (!name.empty()) {
+            if (playbackDevices.empty()) refreshDevices();
+            for (const ma_device_info& d : playbackDevices) {
+                if (name == d.name) {
+                    id = &d.id;
+                    break;
+                }
+            }
+        }
+        ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
+        cfg.playback.pDeviceID = id; // null: default device, and miniaudio follows default changes
+        cfg.playback.format = ma_format_f32;
+        cfg.playback.channels = 2;
+        cfg.sampleRate = sampleRate;
+        cfg.periodSizeInMilliseconds = 10;
+        cfg.performanceProfile = ma_performance_profile_low_latency;
+        cfg.noPreSilencedOutputBuffer = MA_TRUE; // Mixer::process overwrites the whole buffer
+        cfg.noClip = MA_TRUE;                    // Mixer already clamps
+        cfg.dataCallback = &Impl::onPlayback;
+        cfg.pUserData = this;
+        denormalsSet = false; // new device, new audio thread
+        const ma_result r = ma_device_init(&context, &cfg, &device);
+        if (r == MA_SUCCESS) {
+            deviceReady = true;
+            outputName = device.playback.name;
+        }
+        return r;
+    }
 
     static void onPlayback(ma_device* device, void* output, const void*, ma_uint32 frames)
     {
@@ -264,17 +220,13 @@ AudioEngine::~AudioEngine()
     if (impl_->deviceReady) {
         ma_device_uninit(&impl_->device);
     }
-    impl_->mixer.reset(); // frees channels and sources while the resource manager still exists
-    if (impl_->resourceManagerReady) {
-        ma_resource_manager_uninit(&impl_->resourceManager); // joins the job thread
-    }
-    impl_->failedOpens.clear();
+    impl_->mixer.reset();
     if (impl_->contextReady) {
         ma_context_uninit(&impl_->context);
     }
 }
 
-bool AudioEngine::start(std::string* error)
+bool AudioEngine::start(const std::string& outputDevice, std::string* error)
 {
     Impl& m = *impl_;
     if (m.running) {
@@ -287,35 +239,17 @@ bool AudioEngine::start(std::string* error)
         m.contextReady = (r == MA_SUCCESS);
     }
     if (m.contextReady && !m.deviceReady) {
-        ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
-        cfg.playback.format = ma_format_f32;
-        cfg.playback.channels = 2;
-        cfg.sampleRate = 0; // device native rate: no resampling on the output path
-        cfg.periodSizeInMilliseconds = 10;
-        cfg.performanceProfile = ma_performance_profile_low_latency;
-        cfg.noPreSilencedOutputBuffer = MA_TRUE; // Mixer::process overwrites the whole buffer
-        cfg.noClip = MA_TRUE;                    // Mixer already clamps
-        cfg.dataCallback = &Impl::onPlayback;
-        cfg.pUserData = &m;
-        r = ma_device_init(&m.context, &cfg, &m.device);
-        if (r == MA_SUCCESS) {
-            m.deviceReady = true;
-            sampleRate = m.device.sampleRate;
-            m.outputName = m.device.playback.name;
+        m.requestedOutput = outputDevice;
+        // Native rate on first start: no resampling on the output path.
+        r = m.openDevice(outputDevice, m.mixer ? static_cast<uint32_t>(m.mixer->sampleRate()) : 0);
+        if (r != MA_SUCCESS && !outputDevice.empty()) {
+            r = m.openDevice({}, m.mixer ? static_cast<uint32_t>(m.mixer->sampleRate()) : 0); // device unplugged: fall back
         }
     }
     if (m.deviceReady) {
         sampleRate = m.device.sampleRate;
     }
 
-    if (!m.resourceManagerReady) {
-        ma_resource_manager_config rmc = ma_resource_manager_config_init();
-        rmc.decodedFormat = ma_format_f32;
-        rmc.decodedChannels = 2;
-        rmc.decodedSampleRate = sampleRate;
-        rmc.jobThreadCount = 1;
-        m.resourceManagerReady = (ma_resource_manager_init(&rmc, &m.resourceManager) == MA_SUCCESS);
-    }
     if (!m.mixer) {
         m.mixer = std::make_unique<Mixer>(static_cast<float>(sampleRate));
     }
@@ -358,45 +292,60 @@ uint32_t AudioEngine::sampleRate() const
 
 const std::string& AudioEngine::outputDeviceName() const { return impl_->outputName; }
 
-std::vector<std::string> AudioEngine::captureDeviceNames()
+const std::string& AudioEngine::requestedOutput() const { return impl_->requestedOutput; }
+
+std::vector<std::string> AudioEngine::outputDeviceNames()
 {
+    impl_->refreshDevices();
     std::vector<std::string> names;
-    impl_->captureDevices.clear();
-    if (!impl_->contextReady) {
-        return names;
-    }
-    ma_device_info* playback = nullptr;
-    ma_device_info* capture = nullptr;
-    ma_uint32 playbackCount = 0;
-    ma_uint32 captureCount = 0;
-    if (ma_context_get_devices(&impl_->context, &playback, &playbackCount, &capture, &captureCount) != MA_SUCCESS) {
-        return names;
-    }
-    impl_->captureDevices.assign(capture, capture + captureCount);
-    for (const auto& d : impl_->captureDevices) {
+    for (const auto& d : impl_->playbackDevices) {
         names.emplace_back(d.name);
     }
     return names;
 }
 
-std::unique_ptr<FileSource> AudioEngine::openFile(const std::string& utf8Path, std::string* error)
+bool AudioEngine::setOutputDevice(const std::string& name, std::string* error)
 {
-    if (!impl_->resourceManagerReady) {
-        if (error) *error = "Audio file backend is not available";
-        return nullptr;
+    Impl& m = *impl_;
+    if (!m.contextReady) {
+        if (error) *error = "Audio backend is not available";
+        return false;
     }
-    std::error_code ec;
-    const std::filesystem::path fsPath(std::u8string(reinterpret_cast<const char8_t*>(utf8Path.data()), utf8Path.size()));
-    if (!std::filesystem::is_regular_file(fsPath, ec)) {
-        if (error) *error = "File not found: " + utf8Path;
-        return nullptr;
+    stop();
+    if (m.deviceReady) {
+        ma_device_uninit(&m.device); // joins the audio thread
+        m.deviceReady = false;
     }
-    auto src = std::make_unique<FileSourceImpl>();
-    if (!src->init(&impl_->resourceManager, utf8Path, error)) {
-        impl_->failedOpens.push_back(std::move(src));
-        return nullptr;
+    m.requestedOutput = name;
+    m.outputName = "No output device";
+    const uint32_t rate = static_cast<uint32_t>(mixer().sampleRate());
+    ma_result r = m.openDevice(name, rate);
+    if (r != MA_SUCCESS && !name.empty()) {
+        if (error) *error = "Cannot open \"" + name + "\", using the default output: " + resultText(r);
+        m.requestedOutput.clear();
+        r = m.openDevice({}, rate);
     }
-    return src;
+    if (r != MA_SUCCESS) {
+        if (error) *error = "No audio output: " + resultText(r);
+        return false;
+    }
+    r = ma_device_start(&m.device);
+    if (r != MA_SUCCESS) {
+        if (error) *error = "Cannot start audio output: " + resultText(r);
+        return false;
+    }
+    m.running = true;
+    return true;
+}
+
+std::vector<std::string> AudioEngine::captureDeviceNames()
+{
+    impl_->refreshDevices();
+    std::vector<std::string> names;
+    for (const auto& d : impl_->captureDevices) {
+        names.emplace_back(d.name);
+    }
+    return names;
 }
 
 std::unique_ptr<InputSource> AudioEngine::openInput(const std::string& deviceName, std::string* error)
@@ -406,7 +355,7 @@ std::unique_ptr<InputSource> AudioEngine::openInput(const std::string& deviceNam
         return nullptr;
     }
     if (impl_->captureDevices.empty()) {
-        captureDeviceNames();
+        impl_->refreshDevices();
     }
     const ma_device_id* id = nullptr; // empty name = system default input
     if (!deviceName.empty()) {
@@ -419,7 +368,7 @@ std::unique_ptr<InputSource> AudioEngine::openInput(const std::string& deviceNam
         id = &it->id;
     }
     auto src = std::make_unique<InputSourceImpl>();
-    if (!src->init(&impl_->context, id, deviceName.empty() ? "Default input" : deviceName, sampleRate(), error)) {
+    if (!src->init(&impl_->context, id, deviceName.empty() ? "Default microphone" : deviceName, sampleRate(), error)) {
         return nullptr;
     }
     return src;

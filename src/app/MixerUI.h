@@ -12,7 +12,8 @@
 
 namespace psm {
 
-// Immediate-mode UI for the mixer: one strip per channel, a master section and a preset manager.
+// Immediate-mode UI for the mixer: the master section on top, one strip per channel below,
+// plus a preset manager and a short help window.
 // Runs entirely on the UI thread; talks to the audio thread only through Channel/Mixer atomics.
 class MixerUI {
 public:
@@ -23,9 +24,6 @@ public:
 
     void draw(float deltaSeconds);
 
-    // GLFW drop callback: a file dropped on a strip loads into it, anywhere else adds a channel.
-    void onFilesDropped(const std::vector<std::string>& utf8Paths, float x, float y);
-
     // True while meters are moving, so the main loop keeps redrawing; otherwise it can sleep.
     bool isAnimating() const { return animating_; }
 
@@ -34,55 +32,65 @@ public:
 private:
     static constexpr int kCurvePoints = 64;
 
+    // Peak meter with a short peak-hold line.
+    struct Meter {
+        float db = -90.0f;
+        float holdDb = -90.0f;
+        float holdSeconds = 0.0f;
+    };
+
     struct Strip {
         Channel* channel = nullptr;
         std::string preset = "Flat";
         bool presetModified = false;
         std::array<char, 64> nameBuf{};
-        std::array<char, 512> pathBuf{};
         std::array<char, 64> presetNameBuf{};
-        float volumeDb = 0.0f;
-        float meterDb[2] = {-90.0f, -90.0f};
+        float volumePct = 100.0f;
+        Meter meter[2];
         std::array<float, kCurvePoints> curve{};
         bool curveDirty = true;
         std::string error;
-        float rectMin[2] = {0, 0};
-        float rectMax[2] = {0, 0};
     };
 
     Strip* addStrip(const std::string& name);
     void removeStrip(size_t index);
-    void loadFile(Strip& strip, const std::string& utf8Path, bool loop);
-    void loadInput(Strip& strip, const std::string& deviceName);
-    void loadApp(Strip& strip, const std::string& exeName);
+    void addInput(Strip& strip, const std::string& deviceName);
+    void addApp(Strip& strip, const std::string& exeName);
+    void removeSource(Strip& strip, int slot);
+    Strip* findAppStrip(const std::string& exeName, int* slot);
     std::string silentOutputId();
     void reopenAppChannels();
+    void selectOutput(const std::string& name);
     void drawAppRoutingSettings();
     void applyPreset(Strip& strip, const Preset& preset);
     void updateCurve(Strip& strip);
     void savePresets();
 
-    void drawTopBar(float dt);
+    void drawMasterBar(float dt);
+    void drawToolBar();
     void drawStrip(Strip& strip, size_t index, float dt);
     void drawEq(Strip& strip);
-    void drawSourceRow(Strip& strip);
+    void drawSources(Strip& strip);
     void drawPresetRow(Strip& strip);
     void drawPresetManager();
+    void drawHelp();
 
     AudioEngine& engine_;
     PresetLibrary& presets_;
     std::filesystem::path presetFile_;
     std::vector<Strip> strips_;
     std::vector<std::string> captureDevices_;
+    std::vector<std::string> playbackDevices_;
     std::vector<AudioAppInfo> audioApps_;
     std::array<char, 128> appExeBuf_{};
     std::vector<OutputDeviceInfo> outputDevices_;
     bool appAutoRoute_ = true;
     std::string appSilentOutput_; // device name; empty = automatic
     std::string status_;
-    float masterVolumeDb_ = 0.0f;
-    float masterMeterDb_[2] = {-90.0f, -90.0f};
+    float masterVolumePct_ = 100.0f;
+    Meter masterMeter_[2];
     bool showPresetManager_ = false;
+    bool showHelp_ = false;
     std::string selectedPreset_ = "Flat";
     std::array<char, 64> renameBuf_{};
     std::string presetError_;
