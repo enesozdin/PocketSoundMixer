@@ -31,7 +31,7 @@ You can resize the window freely. It stops at a minimum size that still shows th
 | Control | What it does |
 |---|---|
 | Master output | Where the mixer plays. **System default** follows the default device in Windows, so it changes when you switch devices there. You can also pick specific headphones or speakers. The choice is remembered. |
-| Volume | Turns the whole mix up or down. |
+| Volume | Turns the whole mix up or down. On Windows this is the Master output device's own Windows volume, so it always matches the taskbar slider and moves when you press your headset's volume buttons. If the device is muted in Windows, it shows *(muted)*. |
 | Meter | Shows how loud everything together is. The top bar is the left side and the bottom bar is the right side. |
 | Spare output (Windows) | Where apps in a channel have their own sound moved, so you hear them only through the mixer. See [Hearing an app only once](#hearing-an-app-only-once). |
 
@@ -41,7 +41,7 @@ If the saved device is unplugged, the mixer plays on the system default instead.
 
 1. Start playing something in the app, for example a song in Spotify.
 2. Click **+ App** on the channel you want, for example Music.
-3. Pick the app from the list. The popup stays open, so you can pick more apps for the same channel.
+3. Tick the box in front of the app. The popup stays open, so you can tick more apps for the same channel. Untick a box to take that app out again.
 
 Some things to know about apps in channels:
 

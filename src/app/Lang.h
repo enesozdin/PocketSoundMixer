@@ -15,6 +15,12 @@ enum class Language : std::uint8_t { English, Turkish, Count };
     X(SystemDefault, "System default", "Sistem varsayılanı") \
     X(MasterOutputTip, "Speakers or headphones the mixer plays on", "Mikserin çaldığı hoparlör veya kulaklık") \
     X(VolumeFmt, "Volume %.0f%%", "Ses %.0f%%") \
+    X(VolumeMutedFmt, "Volume %.0f%% (muted)", "Ses %.0f%% (sessiz)") \
+    X(MasterVolumeSyncTip, \
+      "The Windows volume of this device: the taskbar slider and your headset buttons move it too.", \
+      "Bu cihazın Windows ses düzeyi: görev çubuğundaki sürgü ve kulaklık tuşların da onu değiştirir.") \
+    X(MasterVolumeMutedTip, "Muted in Windows. Unmute it there or with your headset.", \
+      "Windows'ta sessize alınmış. Oradan ya da kulaklığından sesi aç.") \
     X(SpareOutput, "Spare output", "Yedek çıkış") \
     X(SpareOutputTip, \
       "Apps in a channel have their own sound moved to this device, so you\n" \
@@ -122,8 +128,11 @@ enum class Language : std::uint8_t { English, Turkish, Count };
     X(HelpMasterHead, "Master (top row)", "Ana (üst satır)") \
     X(HelpMasterOutput, "Master output: where you listen. \"System default\" follows Windows; or pick your headphones or speakers.", \
       "Ana çıkış: dinlediğin yer. \"Sistem varsayılanı\" Windows'u izler; ya da kulaklığını veya hoparlörünü seç.") \
-    X(HelpMasterVolume, "Volume: the whole mix, 0-100%. The bar next to it shows how loud everything is together.", \
-      "Ses: tüm karışım, %0-100. Yanındaki çubuk her şeyin birlikte ne kadar yüksek olduğunu gösterir.") \
+    X(HelpMasterVolume, \
+      "Volume: the whole mix, 0-100%. On Windows it is the device's own Windows volume, so the taskbar slider " \
+      "and headset buttons move it too. The bar next to it shows how loud everything is together.", \
+      "Ses: tüm karışım, %0-100. Windows'ta cihazın kendi Windows ses düzeyidir, yani görev çubuğundaki sürgü " \
+      "ve kulaklık tuşları da onu değiştirir. Yanındaki çubuk her şeyin birlikte ne kadar yüksek olduğunu gösterir.") \
     X(HelpButtonsHead, "Buttons under it", "Altındaki butonlar") \
     X(HelpAddChannel, "+ Add channel: a new channel for apps.", "+ Kanal ekle: uygulamalar için yeni bir kanal.") \
     X(HelpAddMic, "+ Add mic channel: a channel for a microphone.", "+ Mikrofon kanalı ekle: bir mikrofon için kanal.") \

@@ -174,6 +174,7 @@ void MixerUI::applySession(const SessionConfig& session)
     masterVolumePct_ = gainToPercent(session.masterVolume);
     setTheme(themeFromName(session.theme));
     setLanguage(languageFromCode(session.language));
+    attachDeviceVolume();
 
     for (const ChannelConfig& c : session.channels) {
         Strip* s = addStrip(c.name, c.kind == "mic");
@@ -210,7 +211,7 @@ void MixerUI::applySession(const SessionConfig& session)
 SessionConfig MixerUI::captureSession() const
 {
     SessionConfig session;
-    session.masterVolume = engine_.mixer().masterVolume.load();
+    session.masterVolume = percentToGain(masterVolumePct_); // the mixer gain is 1 while Windows sets the level
     session.outputDevice = engine_.requestedOutput();
     session.appAutoRoute = appAutoRoute_;
     session.appSilentOutput = appSilentOutput_;
@@ -415,12 +416,27 @@ void MixerUI::selectOutput(const std::string& name)
     std::string err;
     engine_.setOutputDevice(name, &err);
     status_ = err;
+    attachDeviceVolume();
     // A channel may have picked the device that is now the Master: it then plays through Master.
     for (Strip& s : strips_) applyChannelOutput(s);
     closeUnusedOutputs();
     // The spare output for parked apps must never be the one the mixer now plays on.
     outputDevices_.clear();
     reopenAppChannels();
+}
+
+void MixerUI::attachDeviceVolume()
+{
+    if (!deviceVolume_) return;
+    // "System default" follows Windows' default device; otherwise the device actually playing,
+    // which is the default too when the picked one is unplugged.
+    const bool attached = deviceVolume_->attach(engine_.requestedOutput().empty() ? std::string() : engine_.outputDeviceName());
+    if (attached) {
+        // One volume, not two stacked: the mix stays at full scale and Windows sets the level.
+        engine_.mixer().masterVolume = 1.0f;
+    } else {
+        engine_.mixer().masterVolume = percentToGain(masterVolumePct_);
+    }
 }
 
 std::string MixerUI::spareOutputName()
@@ -600,7 +616,16 @@ void MixerUI::drawMasterBar(float dt)
     sameLineIfFits(200.0f, spacing);
     ImGui::SetNextItemWidth(200.0f);
     // NoInput: a double-click must not turn the fader into a text box.
-    if (ImGui::SliderFloat("##master", &masterVolumePct_, 0.0f, 100.0f, tr(S::VolumeFmt), ImGuiSliderFlags_NoInput)) {
+    if (deviceVolume_ && deviceVolume_->attached()) {
+        // Mirrors the Windows volume, so headset buttons and the taskbar slider show up here at once.
+        deviceVolume_->update();
+        float pct = deviceVolume_->level() * 100.0f;
+        const bool deviceMuted = deviceVolume_->muted();
+        if (ImGui::SliderFloat("##master", &pct, 0.0f, 100.0f, tr(deviceMuted ? S::VolumeMutedFmt : S::VolumeFmt), ImGuiSliderFlags_NoInput)) {
+            deviceVolume_->setLevel(pct * 0.01f);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tr(deviceMuted ? S::MasterVolumeMutedTip : S::MasterVolumeSyncTip));
+    } else if (ImGui::SliderFloat("##master", &masterVolumePct_, 0.0f, 100.0f, tr(S::VolumeFmt), ImGuiSliderFlags_NoInput)) {
         mixer.masterVolume = percentToGain(masterVolumePct_);
     }
 
@@ -873,9 +898,14 @@ void MixerUI::drawAppSources(Strip& strip)
             std::string label = app.displayName;
             if (owner == &strip) label += tr(S::InThisChannel);
             else if (owner) label += format(S::InOtherChannelFmt, owner->channel->name().c_str());
-            if (ImGui::Selectable(label.c_str(), owner == &strip, ImGuiSelectableFlags_NoAutoClosePopups)) {
-                addApp(strip, app.exeName);
+            // A checkbox shows at a glance that each row can be clicked, and what is already in.
+            bool inHere = owner == &strip;
+            ImGui::PushID(app.exeName.c_str());
+            if (ImGui::Checkbox(label.c_str(), &inHere)) {
+                if (inHere) addApp(strip, app.exeName);
+                else removeSource(strip, slot);
             }
+            ImGui::PopID();
         }
         if (audioApps_.empty()) {
             ImGui::TextDisabled("%s", tr(S::NoAppsNow));

@@ -107,7 +107,10 @@ int main()
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glslVersion);
 
+    // Windows wakes the UI when the device volume changes (headset buttons, taskbar slider).
+    psm::DeviceVolume deviceVolume([] { glfwPostEmptyEvent(); });
     psm::MixerUI ui(engine, presets, presetFile);
+    ui.setDeviceVolume(&deviceVolume);
     ui.setUiScale(scale); // the theme scales the style; applySession applies the saved theme
     ui.applySession(session);
     if (!audioError.empty()) ui.setStatus(audioError);

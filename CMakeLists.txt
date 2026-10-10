@@ -25,6 +25,7 @@ add_library(psm_core STATIC
     src/core/AppCapture.cpp
     src/core/AudioEngine.cpp
     src/core/Channel.cpp
+    src/core/DeviceVolume.cpp
     src/core/GraphicEq.cpp
     src/core/Mixer.cpp
     src/core/Paths.cpp
