@@ -8,30 +8,37 @@
 
 namespace psm {
 
+// One thing playing into a channel.
+struct SourceConfig {
+    std::string type;        // "app" | "input"
+    std::string appExe;      // e.g. "Spotify.exe"
+    std::string inputDevice; // empty = system default input (microphone)
+};
+
 // What the app restores on the next launch: the channel layout and every strip's settings.
 struct ChannelConfig {
     std::string name;
+    std::string kind = "apps"; // "apps" (apps go in it) | "mic" (one microphone)
     std::string preset = "Flat";
     EqGains gainsDb{};
-    float volume = 1.0f;
+    float volume = 1.0f; // linear, 0..1
     float pan = 0.0f;
     bool mute = false;
     bool solo = false;
-    std::string sourceType = "none"; // "none" | "file" | "input" | "app"
-    std::string filePath;            // UTF-8
-    bool loop = true;
-    std::string inputDevice;         // empty = system default input
-    std::string appExe;              // e.g. "Spotify.exe"
+    std::vector<SourceConfig> sources;
+    std::string output; // device this channel plays on; empty = Automatic (the Master output)
 };
 
 struct SessionConfig {
     float masterVolume = 1.0f;
+    std::string outputDevice;    // where the mixer plays; empty = system default
+    std::string theme = "Dark";  // "Dark" | "Midnight" | "Light"
     bool appAutoRoute = true;    // park captured apps' own output so they are heard once
     std::string appSilentOutput; // device name to park them on; empty = pick automatically
     std::vector<ChannelConfig> channels;
 };
 
-// Music, Game, Film, Chat and Podcast, each with its matching preset.
+// Music, Game, Film, Chat and Podcast with their matching presets, plus a muted Mic channel.
 SessionConfig defaultSession();
 
 bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::string* error);

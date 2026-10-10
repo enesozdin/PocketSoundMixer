@@ -24,6 +24,16 @@ const Preset kBuiltIns[] = {
     {"Podcast",      {-6,   -4,   -1,    1,    0,    1,    3,    3,    1,    0}, true},
 };
 
+constexpr const char* kKeptPreset = "Flat"; // the way back to an unchanged sound
+
+const Preset* findBuiltIn(const std::string& name)
+{
+    for (const Preset& p : kBuiltIns) {
+        if (p.name == name) return &p;
+    }
+    return nullptr;
+}
+
 bool setError(std::string* error, std::string text)
 {
     if (error) *error = std::move(text);
@@ -75,13 +85,36 @@ bool PresetLibrary::rename(const std::string& from, const std::string& to, std::
     return true;
 }
 
+bool PresetLibrary::canRemove(const std::string& name) const
+{
+    return name != kKeptPreset && find(name) != nullptr;
+}
+
 bool PresetLibrary::remove(const std::string& name, std::string* error)
 {
     const Preset* p = find(name);
     if (!p) return setError(error, "Preset not found: " + name);
-    if (p->builtIn) return setError(error, "Built-in presets cannot be deleted");
+    if (name == kKeptPreset) return setError(error, "Flat can't be deleted: it is the way back to the original sound");
+    if (p->builtIn) hiddenBuiltIns_.push_back(name);
     presets_.erase(presets_.begin() + (p - presets_.data()));
     return true;
+}
+
+void PresetLibrary::restoreBuiltIns()
+{
+    // Built-ins first in their original order, then the user's presets as they were.
+    std::vector<Preset> result;
+    for (const Preset& b : kBuiltIns) {
+        const Preset* current = find(b.name);
+        if (!current) result.push_back(b);                      // was deleted: comes back
+        else if (current->builtIn) result.push_back(*current);
+        // else a user preset took the name meanwhile; the user's one wins
+    }
+    for (const Preset& p : presets_) {
+        if (!p.builtIn) result.push_back(p);
+    }
+    presets_ = std::move(result);
+    hiddenBuiltIns_.clear();
 }
 
 bool PresetLibrary::loadUserPresets(const std::filesystem::path& file, std::string* error)
@@ -93,6 +126,13 @@ bool PresetLibrary::loadUserPresets(const std::filesystem::path& file, std::stri
     const nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
     if (j.is_discarded() || !j.contains("presets") || !j["presets"].is_array()) {
         return setError(error, "Preset file is damaged: " + file.string());
+    }
+    if (j.contains("hiddenBuiltIns") && j["hiddenBuiltIns"].is_array()) {
+        for (const auto& h : j["hiddenBuiltIns"]) {
+            if (h.is_string() && h.get<std::string>() != kKeptPreset && findBuiltIn(h.get<std::string>())) {
+                remove(h.get<std::string>(), nullptr);
+            }
+        }
     }
     for (const auto& item : j["presets"]) {
         if (!item.contains("name") || !item["name"].is_string() || !item.contains("gains") || !item["gains"].is_array()) {
@@ -114,6 +154,7 @@ bool PresetLibrary::saveUserPresets(const std::filesystem::path& file, std::stri
 {
     nlohmann::json j;
     j["version"] = 1;
+    j["hiddenBuiltIns"] = hiddenBuiltIns_;
     j["presets"] = nlohmann::json::array();
     for (const Preset& p : presets_) {
         if (!p.builtIn) {

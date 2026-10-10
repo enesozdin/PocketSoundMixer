@@ -3,6 +3,7 @@
 #include "GraphicEq.h"
 #include "Mixer.h"
 #include "Presets.h"
+#include "Session.h"
 #include "StereoRingBuffer.h"
 
 #include <cmath>
@@ -126,8 +127,8 @@ void testMixerSumMuteSoloPan()
     psm::Mixer mixer(kRate);
     psm::Channel* a = mixer.addChannel("A");
     psm::Channel* b = mixer.addChannel("B");
-    mixer.replaceSource(a, std::make_unique<ConstSource>(0.25f, nullptr));
-    mixer.replaceSource(b, std::make_unique<ConstSource>(0.125f, nullptr));
+    mixer.replaceSource(a, 0, std::make_unique<ConstSource>(0.25f, nullptr));
+    mixer.replaceSource(b, 0, std::make_unique<ConstSource>(0.125f, nullptr));
 
     std::vector<float> out(512 * 2);
     auto settle = [&] { mixer.process(out.data(), 512); mixer.process(out.data(), 512); };
@@ -169,7 +170,7 @@ void testRemoveIsDeferredUntilAudioThreadMovesOn()
     psm::Mixer mixer(kRate);
     bool destroyed = false;
     psm::Channel* a = mixer.addChannel("A");
-    mixer.replaceSource(a, std::make_unique<ConstSource>(0.5f, &destroyed));
+    mixer.replaceSource(a, 0, std::make_unique<ConstSource>(0.5f, &destroyed));
     std::vector<float> out(256 * 2);
     mixer.process(out.data(), 256);
 
@@ -186,7 +187,7 @@ void testRemoveIsDeferredUntilAudioThreadMovesOn()
     // flushGarbage waits for the audio thread instead of leaving the object for a later frame.
     bool flushed = false;
     psm::Channel* b = mixer.addChannel("B");
-    mixer.replaceSource(b, std::make_unique<ConstSource>(0.5f, &flushed));
+    mixer.replaceSource(b, 0, std::make_unique<ConstSource>(0.5f, &flushed));
     std::atomic<bool> running{true};
     std::thread audio([&] {
         std::vector<float> buf(64 * 2);
@@ -195,7 +196,7 @@ void testRemoveIsDeferredUntilAudioThreadMovesOn()
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
-    mixer.replaceSource(b, nullptr);
+    mixer.replaceSource(b, 0, nullptr);
     mixer.flushGarbage(1000);
     CHECK(flushed);
     running = false;
@@ -221,7 +222,10 @@ void testPresetLibrary()
     CHECK(!lib.save("Flat", g, &err));      // built-ins are read-only
     CHECK(lib.save("My Preset", g, &err));
     CHECK(lib.rename("My Preset", "Night", &err));
-    CHECK(!lib.remove("Vocal", &err));
+    CHECK(!lib.remove("Flat", &err));       // Flat always stays
+    CHECK(!lib.canRemove("Flat") && lib.canRemove("Vocal"));
+    CHECK(lib.remove("Vocal", &err));       // built-ins can be deleted...
+    CHECK(lib.find("Vocal") == nullptr && lib.hasHiddenBuiltIns());
     CHECK(lib.save("Temp", g, &err));
     CHECK(lib.remove("Temp", &err));
     CHECK(lib.find("Temp") == nullptr);
@@ -233,65 +237,146 @@ void testPresetLibrary()
     CHECK(loaded.find("Night") && !loaded.find("Night")->builtIn);
     CHECK_NEAR(loaded.find("Night")->gainsDb[0], 3.0f, 1e-6f);
     CHECK(loaded.presets().size() == lib.presets().size());
+    CHECK(loaded.find("Vocal") == nullptr);  // ...and stay deleted after a restart
+    loaded.restoreBuiltIns();                // ...until restored, in their original place
+    CHECK(loaded.find("Vocal") && loaded.find("Vocal")->builtIn && !loaded.hasHiddenBuiltIns());
+    CHECK(loaded.presets()[3].name == "Vocal");
+    CHECK(loaded.find("Night") != nullptr);
     std::filesystem::remove(file);
 }
 
-// 16-bit stereo PCM WAV writer, just enough for the playback test.
-void writeTestWav(const std::filesystem::path& file, uint32_t rate, uint32_t frames, float freq)
+void testSeveralSourcesInOneChannel()
 {
-    std::ofstream out(file, std::ios::binary);
-    auto u32 = [&](uint32_t v) { out.write(reinterpret_cast<const char*>(&v), 4); };
-    auto u16 = [&](uint16_t v) { out.write(reinterpret_cast<const char*>(&v), 2); };
-    const uint32_t dataBytes = frames * 4;
-    out.write("RIFF", 4); u32(36 + dataBytes); out.write("WAVE", 4);
-    out.write("fmt ", 4); u32(16); u16(1); u16(2); u32(rate); u32(rate * 4); u16(4); u16(16);
-    out.write("data", 4); u32(dataBytes);
-    for (uint32_t n = 0; n < frames; ++n) {
-        const auto v = static_cast<int16_t>(16000.0f * std::sin(2.0f * kPi * freq * float(n) / float(rate)));
-        out.write(reinterpret_cast<const char*>(&v), 2);
-        out.write(reinterpret_cast<const char*>(&v), 2);
+    psm::Mixer mixer(kRate);
+    psm::Channel* a = mixer.addChannel("Music");
+    bool firstGone = false;
+    CHECK(mixer.addSource(a, std::make_unique<ConstSource>(0.25f, &firstGone)));
+    CHECK(mixer.addSource(a, std::make_unique<ConstSource>(0.125f, nullptr)));
+    CHECK(mixer.addSource(a, std::make_unique<ConstSource>(0.0625f, nullptr)));
+    CHECK(a->sourceCount() == 3);
+
+    std::vector<float> out(512 * 2);
+    auto settle = [&] { mixer.process(out.data(), 512); mixer.process(out.data(), 512); };
+    settle();
+    CHECK_NEAR(out[1000], 0.4375f, 1e-5f); // all three summed
+
+    mixer.replaceSource(a, 0, nullptr); // remove one app, the others keep playing
+    settle();
+    CHECK_NEAR(out[1000], 0.1875f, 1e-5f);
+    mixer.collectGarbage();
+    CHECK(firstGone);
+    CHECK(a->freeSourceSlot() == 0); // the freed slot is reused first
+
+    for (int i = a->sourceCount(); i < psm::Channel::kMaxSources; ++i) {
+        CHECK(mixer.addSource(a, std::make_unique<ConstSource>(0.0f, nullptr)));
     }
+    CHECK(!mixer.addSource(a, std::make_unique<ConstSource>(0.0f, nullptr)));
+
+    mixer.clearSources(a);
+    CHECK(a->sourceCount() == 0);
+    settle();
+    CHECK_NEAR(out[1000], 0.0f, 1e-9f);
 }
 
-void testFilePlaybackStreamsAndStops()
+void testChannelOnExtraOutput()
 {
-    // Works with or without a sound card: when no device opens, the file backend still runs.
+    psm::Mixer mixer(kRate);
+    psm::Channel* music = mixer.addChannel("Music");
+    psm::Channel* chat = mixer.addChannel("Chat");
+    mixer.addSource(music, std::make_unique<ConstSource>(0.25f, nullptr));
+    mixer.addSource(chat, std::make_unique<ConstSource>(0.5f, nullptr));
+    chat->output = 1; // e.g. a headset
+
+    std::vector<float> out(512 * 2);
+    std::vector<float> extra(512 * 2);
+    auto settle = [&] { mixer.process(out.data(), 512); mixer.process(out.data(), 512); };
+
+    settle(); // no bus 1 yet: chat falls back to the Master device
+    CHECK_NEAR(out[1000], 0.75f, 1e-5f);
+
+    auto bus = std::make_unique<psm::OutputBus>(4096);
+    psm::OutputBus* raw = bus.get();
+    mixer.setOutputBus(1, std::move(bus));
+    settle();
+    CHECK_NEAR(out[1000], 0.25f, 1e-5f);        // Master hears only music
+    CHECK(raw->ring.available() >= 1024);
+    raw->ring.read(extra.data(), 512, 0, 100000);
+    raw->ring.read(extra.data(), 512, 0, 100000);
+    CHECK_NEAR(extra[1000], 0.5f, 1e-5f);       // the headset gets chat, master volume applied
+    mixer.masterVolume = 0.5f;
+    settle();
+    raw->ring.read(extra.data(), 512, 0, 100000);
+    raw->ring.read(extra.data(), 512, 0, 100000);
+    CHECK_NEAR(extra[1000], 0.25f, 1e-5f);
+
+    mixer.setOutputBus(1, nullptr); // device closed: back to Master, bus freed later
+    mixer.masterVolume = 1.0f;
+    settle();
+    CHECK_NEAR(out[1000], 0.75f, 1e-5f);
+    mixer.collectGarbage();
+}
+
+void testMutedChannelStillMeters()
+{
+    psm::Mixer mixer(kRate);
+    psm::Channel* mic = mixer.addChannel("Mic");
+    mixer.addSource(mic, std::make_unique<ConstSource>(0.5f, nullptr));
+    mic->mute = true;
+    mic->volume = 0.25f;
+    std::vector<float> out(512 * 2);
+    mixer.process(out.data(), 512);
+    mixer.process(out.data(), 512);
+    mic->takePeak(0);
+    mixer.process(out.data(), 512);
+    CHECK_NEAR(out[1000], 0.0f, 1e-9f);            // not heard
+    CHECK_NEAR(mic->takePeak(0), 0.125f, 1e-5f);   // but the meter shows what you would hear
+}
+
+void testSessionRoundTripAndOldFormat()
+{
+    std::string err;
+    const psm::SessionConfig def = psm::defaultSession();
+    CHECK(def.channels.size() == 6);
+    CHECK(def.channels.back().name == "Mic" && def.channels.back().mute && def.channels.back().kind == "mic");
+    CHECK(def.channels.front().kind == "apps");
+    CHECK(def.channels.back().sources.size() == 1 && def.channels.back().sources[0].type == "input");
+
+    psm::SessionConfig s = def;
+    s.outputDevice = "Headphones";
+    s.theme = "Light";
+    s.channels[0].sources = {{"app", "Spotify.exe", {}}, {"app", "chrome.exe", {}}};
+    s.channels[3].output = "Headset";
+    const auto file = std::filesystem::temp_directory_path() / "psm_test_session.json";
+    CHECK(psm::saveSession(file, s, &err));
+    psm::SessionConfig loaded;
+    CHECK(psm::loadSession(file, loaded, &err));
+    CHECK(loaded.outputDevice == "Headphones");
+    CHECK(loaded.theme == "Light");
+    CHECK(loaded.channels[3].output == "Headset" && loaded.channels[0].output.empty());
+    CHECK(loaded.channels.back().kind == "mic" && loaded.channels.back().sources.size() == 1);
+    CHECK(loaded.channels.size() == 6);
+    CHECK(loaded.channels[0].sources.size() == 2 && loaded.channels[0].sources[1].appExe == "chrome.exe");
+
+    // Layouts saved by earlier test builds (before version 3) are dropped: the app starts with the six defaults.
+    {
+        std::ofstream out(file, std::ios::trunc);
+        out << R"({"version":2,"master":0.5,"channels":[{"name":"A"},{"name":"B"},{"name":"C"},{"name":"D"},
+            {"name":"E"},{"name":"F"},{"name":"G"},{"name":"H"},{"name":"I"}]})";
+    }
+    psm::SessionConfig old;
+    CHECK(!psm::loadSession(file, old, &err));
+    std::filesystem::remove(file);
+}
+
+void testEngineStartsWithMissingOutputDevice()
+{
+    // Works with or without a sound card: an unplugged saved device falls back to the default.
     psm::AudioEngine engine;
     std::string err;
-    engine.start(&err);
-    engine.stop(); // drive the source by hand below
-
-    const auto file = std::filesystem::temp_directory_path() / "psm_test_tone.wav";
-    writeTestWav(file, 44100, 44100 / 2, 440.0f); // 0.5 s, resampled to the engine rate
-    std::unique_ptr<psm::FileSource> src = engine.openFile(file.string(), &err);
-    CHECK(src != nullptr);
-    if (!src) {
-        std::printf("  %s\n", err.c_str());
-        return;
-    }
-    CHECK(engine.openFile("does_not_exist.wav", &err) == nullptr);
-    const auto junk = std::filesystem::temp_directory_path() / "psm_test_junk.wav";
-    { std::ofstream(junk, std::ios::binary) << "this is not audio"; }
-    CHECK(engine.openFile(junk.string(), &err) == nullptr);
-    std::filesystem::remove(junk);
-
-    src->setLooping(false);
-    std::vector<float> buf(512 * 2);
-    float peak = 0.0f;
-    uint64_t total = 0;
-    // Streaming decodes on a job thread; give it time like a real audio callback would.
-    for (int i = 0; i < 400 && src->isPlaying(); ++i) {
-        src->read(buf.data(), 512);
-        for (float v : buf) peak = std::max(peak, std::fabs(v));
-        total += 512;
-        if (i % 8 == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
-        }
-    }
-    CHECK(peak > 0.3f);
-    CHECK(!src->isPlaying()); // a non-looping file stops by itself at the end
-    src.reset();
-    std::filesystem::remove(file);
+    engine.start("Device that does not exist", &err);
+    CHECK(engine.sampleRate() > 0);
+    engine.mixer(); // always available, even with no device
+    engine.stop();
 }
 
 void testRingBuffer()
@@ -346,7 +431,11 @@ int main()
     testChannelLimit();
     testPresetLibrary();
     testRingBuffer();
-    testFilePlaybackStreamsAndStops();
+    testSeveralSourcesInOneChannel();
+    testMutedChannelStillMeters();
+    testChannelOnExtraOutput();
+    testSessionRoundTripAndOldFormat();
+    testEngineStartsWithMissingOutputDevice();
     if (g_failures == 0) {
         std::printf("All core tests passed\n");
         return 0;

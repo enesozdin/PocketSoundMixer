@@ -22,12 +22,13 @@ struct OutputDeviceInfo {
 // True where per-app capture is implemented (Windows).
 bool appCaptureSupported();
 
-// Active output devices. The mixer itself plays on the default one.
+// Active output devices.
 std::vector<OutputDeviceInfo> listOutputDevices();
 
 // A device the user is unlikely to listen to, for parking captured apps: the first active
-// output that is not the default. Empty when the PC has only one output.
-std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>& devices);
+// output that is neither the system default nor one of `inUseNames` (where the mixer plays).
+// Empty when there is no such device.
+std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>& devices, const std::vector<std::string>& inUseNames);
 
 // Apps that currently have an audio session on any active output device.
 std::vector<AudioAppInfo> listAudioApps();

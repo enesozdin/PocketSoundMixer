@@ -16,21 +16,6 @@
 
 namespace {
 
-struct DropState {
-    psm::MixerUI* ui = nullptr;
-};
-
-void onDrop(GLFWwindow* window, int count, const char** paths)
-{
-    auto* state = static_cast<DropState*>(glfwGetWindowUserPointer(window));
-    if (!state || !state->ui) return;
-    double x = 0.0;
-    double y = 0.0;
-    glfwGetCursorPos(window, &x, &y);
-    std::vector<std::string> files(paths, paths + count);
-    state->ui->onFilesDropped(files, static_cast<float>(x), static_cast<float>(y));
-}
-
 void onGlfwError(int code, const char* text)
 {
     std::fprintf(stderr, "GLFW error %d: %s\n", code, text);
@@ -44,10 +29,16 @@ int main()
     const auto presetFile = configDir / "presets.json";
     const auto sessionFile = configDir / "session.json";
 
+    psm::SessionConfig session;
+    std::string sessionError;
+    if (!psm::loadSession(sessionFile, session, &sessionError)) {
+        session = psm::defaultSession();
+    }
+
     // Audio first: the Mixer's sample rate comes from the output device.
     psm::AudioEngine engine;
     std::string audioError;
-    engine.start(&audioError);
+    engine.start(session.outputDevice, &audioError);
 
     psm::PresetLibrary presets;
     std::string presetError;
@@ -81,14 +72,11 @@ int main()
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr; // layout is fixed; nothing to persist
-    ImGui::StyleColorsDark();
-
     float scale = 1.0f;
     glfwGetWindowContentScale(window, &scale, nullptr);
 #if defined(__APPLE__)
     scale = 1.0f; // macOS scales the framebuffer itself
 #endif
-    ImGui::GetStyle().ScaleAllSizes(scale);
     ImFontConfig fontCfg;
     fontCfg.SizePixels = 14.0f * scale;
     io.Fonts->AddFontDefault(&fontCfg);
@@ -97,19 +85,11 @@ int main()
     ImGui_ImplOpenGL3_Init(glslVersion);
 
     psm::MixerUI ui(engine, presets, presetFile);
-    psm::SessionConfig session;
-    std::string sessionError;
-    if (!psm::loadSession(sessionFile, session, &sessionError)) {
-        session = psm::defaultSession();
-    }
+    ui.setUiScale(scale); // the theme scales the style; applySession applies the saved theme
     ui.applySession(session);
     if (!audioError.empty()) ui.setStatus(audioError);
     else if (!presetError.empty()) ui.setStatus(presetError);
     else if (!sessionError.empty()) ui.setStatus(sessionError);
-
-    DropState dropState{&ui};
-    glfwSetWindowUserPointer(window, &dropState);
-    glfwSetDropCallback(window, onDrop);
 
     double lastTime = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {
@@ -137,7 +117,8 @@ int main()
         int h = 0;
         glfwGetFramebufferSize(window, &w, &h);
         glViewport(0, 0, w, h);
-        glClearColor(0.08f, 0.08f, 0.09f, 1.0f);
+        const ImVec4 bg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+        glClearColor(bg.x, bg.y, bg.z, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);

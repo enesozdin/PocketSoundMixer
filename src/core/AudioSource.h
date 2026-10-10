@@ -13,7 +13,7 @@ public:
     virtual ~Retirable() = default;
 };
 
-enum class SourceKind : uint8_t { File, Input, App, Other };
+enum class SourceKind : uint8_t { Input, App, Other };
 
 // A stereo float producer pulled by the audio thread.
 class AudioSource : public Retirable {
@@ -22,22 +22,6 @@ public:
     // Writes exactly `frames` interleaved stereo frames (zero-fills what it cannot produce).
     virtual void read(float* outStereo, uint32_t frames) = 0;
     virtual SourceKind kind() const = 0;
-};
-
-// Plays a WAV / MP3 / FLAC file, streamed and decoded off the audio thread.
-class FileSource : public AudioSource {
-public:
-    SourceKind kind() const override { return SourceKind::File; }
-
-    // UI thread, lock-free.
-    virtual const std::string& path() const = 0;
-    virtual bool isPlaying() const = 0;
-    virtual void setPlaying(bool playing) = 0;
-    virtual bool isLooping() const = 0;
-    virtual void setLooping(bool looping) = 0;
-    virtual uint64_t lengthFrames() const = 0;   // 0 when unknown
-    virtual uint64_t cursorFrames() const = 0;
-    virtual void requestSeek(uint64_t frame) = 0;
 };
 
 // Live audio from a capture device (mic, line-in, audio interface).

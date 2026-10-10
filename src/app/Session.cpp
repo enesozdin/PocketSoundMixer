@@ -7,6 +7,10 @@
 
 namespace psm {
 
+namespace {
+constexpr int kSessionVersion = 3;
+}
+
 SessionConfig defaultSession()
 {
     SessionConfig s;
@@ -16,6 +20,14 @@ SessionConfig defaultSession()
         c.preset = name;
         s.channels.push_back(c);
     }
+    // Muted so nobody hears themselves through the speakers; the meter still shows the mic works.
+    ChannelConfig mic;
+    mic.name = "Mic";
+    mic.kind = "mic";
+    mic.preset = "Vocal";
+    mic.mute = true;
+    mic.sources.push_back({"input", {}, {}});
+    s.channels.push_back(mic);
     return s;
 }
 
@@ -30,14 +42,20 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
         if (error) *error = "Session file is damaged, starting fresh: " + file.string();
         return false;
     }
+    if (j.value("version", 1) < kSessionVersion) {
+        return false; // layouts from test builds before v3: start with the six default channels
+    }
     SessionConfig s;
-    s.masterVolume = std::clamp(j.value("master", 1.0f), 0.0f, 2.0f);
+    s.masterVolume = std::clamp(j.value("master", 1.0f), 0.0f, 1.0f);
+    s.outputDevice = j.value("outputDevice", std::string());
+    s.theme = j.value("theme", std::string("Dark"));
     s.appAutoRoute = j.value("appAutoRoute", true);
     s.appSilentOutput = j.value("appSilentOutput", std::string());
     for (const auto& c : j["channels"]) {
         if (!c.is_object()) continue;
         ChannelConfig cc;
         cc.name = c.value("name", std::string("Channel"));
+        cc.kind = c.value("kind", std::string());
         cc.preset = c.value("preset", std::string("Flat"));
         if (c.contains("gains") && c["gains"].is_array()) {
             for (int b = 0; b < kEqBands && b < static_cast<int>(c["gains"].size()); ++b) {
@@ -46,15 +64,30 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
                 }
             }
         }
-        cc.volume = std::clamp(c.value("volume", 1.0f), 0.0f, 2.0f);
+        cc.volume = std::clamp(c.value("volume", 1.0f), 0.0f, 1.0f);
         cc.pan = std::clamp(c.value("pan", 0.0f), -1.0f, 1.0f);
         cc.mute = c.value("mute", false);
         cc.solo = c.value("solo", false);
-        cc.sourceType = c.value("source", std::string("none"));
-        cc.filePath = c.value("file", std::string());
-        cc.loop = c.value("loop", true);
-        cc.inputDevice = c.value("input", std::string());
-        cc.appExe = c.value("app", std::string());
+        cc.output = c.value("output", std::string());
+        if (c.contains("sources") && c["sources"].is_array()) {
+            for (const auto& src : c["sources"]) {
+                if (!src.is_object()) continue;
+                SourceConfig sc;
+                sc.type = src.value("type", std::string());
+                sc.appExe = src.value("app", std::string());
+                sc.inputDevice = src.value("input", std::string());
+                if (sc.type == "app" ? !sc.appExe.empty() : sc.type == "input") cc.sources.push_back(std::move(sc));
+            }
+        }
+        if (cc.kind != "apps" && cc.kind != "mic") { // kind missing: a channel holding a mic is the mic channel
+            const bool hasInput = std::any_of(cc.sources.begin(), cc.sources.end(), [](const SourceConfig& x) { return x.type == "input"; });
+            cc.kind = hasInput ? "mic" : "apps";
+        }
+        // A mic channel holds one microphone; an app channel holds apps only.
+        const std::string keep = cc.kind == "mic" ? "input" : "app";
+        cc.sources.erase(std::remove_if(cc.sources.begin(), cc.sources.end(), [&](const SourceConfig& x) { return x.type != keep; }),
+                         cc.sources.end());
+        if (cc.kind == "mic" && cc.sources.size() > 1) cc.sources.resize(1);
         s.channels.push_back(std::move(cc));
     }
     out = std::move(s);
@@ -64,16 +97,23 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
 bool saveSession(const std::filesystem::path& file, const SessionConfig& session, std::string* error)
 {
     nlohmann::json j;
-    j["version"] = 1;
+    j["version"] = kSessionVersion;
     j["master"] = session.masterVolume;
+    j["outputDevice"] = session.outputDevice;
+    j["theme"] = session.theme;
     j["appAutoRoute"] = session.appAutoRoute;
     j["appSilentOutput"] = session.appSilentOutput;
     j["channels"] = nlohmann::json::array();
     for (const ChannelConfig& c : session.channels) {
+        nlohmann::json sources = nlohmann::json::array();
+        for (const SourceConfig& src : c.sources) {
+            sources.push_back(src.type == "app" ? nlohmann::json{{"type", "app"}, {"app", src.appExe}}
+                                                : nlohmann::json{{"type", "input"}, {"input", src.inputDevice}});
+        }
         j["channels"].push_back({
-            {"name", c.name}, {"preset", c.preset}, {"gains", c.gainsDb},
-            {"volume", c.volume}, {"pan", c.pan}, {"mute", c.mute}, {"solo", c.solo},
-            {"source", c.sourceType}, {"file", c.filePath}, {"loop", c.loop}, {"input", c.inputDevice}, {"app", c.appExe},
+            {"name", c.name}, {"kind", c.kind}, {"preset", c.preset}, {"gains", c.gainsDb},
+            {"volume", c.volume}, {"pan", c.pan}, {"mute", c.mute}, {"solo", c.solo}, {"output", c.output},
+            {"sources", std::move(sources)},
         });
     }
     std::error_code ec;

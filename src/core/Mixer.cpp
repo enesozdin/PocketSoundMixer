@@ -9,14 +9,31 @@ namespace psm {
 
 Mixer::Mixer(float sampleRate)
     : sampleRate_(sampleRate)
-    , scratch_(static_cast<size_t>(kMaxBlockFrames) * 2, 0.0f)
+    , scratch_(static_cast<size_t>(kMaxBlockFrames) * 4, 0.0f)
+    , busScratch_(static_cast<size_t>(kMaxBlockFrames) * 2 * kMaxOutputs, 0.0f)
 {
     for (auto& s : slots_) {
         s.store(nullptr, std::memory_order_relaxed);
     }
+    for (auto& b : buses_) {
+        b.store(nullptr, std::memory_order_relaxed);
+    }
 }
 
-Mixer::~Mixer() = default; // the audio device must be stopped before this runs
+Mixer::~Mixer() // every audio device must be stopped before this runs
+{
+    for (auto& b : buses_) {
+        delete b.load(std::memory_order_acquire);
+    }
+}
+
+void Mixer::setOutputBus(int index, std::unique_ptr<OutputBus> bus)
+{
+    if (index <= 0 || index >= kMaxOutputs) return;
+    if (OutputBus* old = buses_[index].exchange(bus.release(), std::memory_order_acq_rel)) {
+        retire(std::unique_ptr<Retirable>(old));
+    }
+}
 
 Channel* Mixer::addChannel(std::string name)
 {
@@ -50,10 +67,25 @@ void Mixer::removeChannel(Channel* channel)
     }
 }
 
-void Mixer::replaceSource(Channel* channel, std::unique_ptr<AudioSource> source)
+bool Mixer::addSource(Channel* channel, std::unique_ptr<AudioSource> source)
 {
-    if (auto old = channel->exchangeSource(std::move(source))) {
+    const int slot = channel->freeSourceSlot();
+    if (slot < 0) return false;
+    replaceSource(channel, slot, std::move(source));
+    return true;
+}
+
+void Mixer::replaceSource(Channel* channel, int slot, std::unique_ptr<AudioSource> source)
+{
+    if (auto old = channel->exchangeSource(slot, std::move(source))) {
         retire(std::move(old));
+    }
+}
+
+void Mixer::clearSources(Channel* channel)
+{
+    for (int i = 0; i < Channel::kMaxSources; ++i) {
+        replaceSource(channel, i, nullptr);
     }
 }
 
@@ -85,11 +117,23 @@ void Mixer::flushGarbage(int timeoutMs)
 void Mixer::process(float* out, uint32_t frames)
 {
     float* scratch = scratch_.data();
+    float* temp = scratch + static_cast<size_t>(kMaxBlockFrames) * 2;
     uint32_t done = 0;
     while (done < frames) {
         const uint32_t n = std::min(kMaxBlockFrames, frames - done);
-        float* block = out + static_cast<size_t>(done) * 2;
-        std::fill(block, block + static_cast<size_t>(n) * 2, 0.0f);
+        const size_t samples = static_cast<size_t>(n) * 2;
+
+        // Mix targets for this block: the Master device plus each extra output that exists.
+        std::array<OutputBus*, kMaxOutputs> bus{};
+        std::array<float*, kMaxOutputs> target{};
+        target[0] = out + static_cast<size_t>(done) * 2;
+        for (int k = 1; k < kMaxOutputs; ++k) {
+            bus[k] = buses_[k].load(std::memory_order_acquire);
+            target[k] = bus[k] ? busScratch_.data() + static_cast<size_t>(k) * kMaxBlockFrames * 2 : nullptr;
+        }
+        for (int k = 0; k < kMaxOutputs; ++k) {
+            if (target[k]) std::fill(target[k], target[k] + samples, 0.0f);
+        }
 
         bool anySolo = false;
         for (const auto& slot : slots_) {
@@ -101,26 +145,33 @@ void Mixer::process(float* out, uint32_t frames)
         }
         for (const auto& slot : slots_) {
             if (Channel* c = slot.load(std::memory_order_acquire)) {
-                c->process(block, scratch, n, anySolo);
+                const int o = c->output.load(std::memory_order_relaxed);
+                float* dst = (o > 0 && o < kMaxOutputs && target[o]) ? target[o] : target[0];
+                c->process(dst, scratch, temp, n, anySolo);
             }
         }
 
-        const float target = masterVolume.load(std::memory_order_relaxed);
-        const float step = (target - currentMaster_) / static_cast<float>(n);
-        float g = currentMaster_;
+        const float targetGain = masterVolume.load(std::memory_order_relaxed);
+        const float step = (targetGain - currentMaster_) / static_cast<float>(n);
         float peakL = 0.0f;
         float peakR = 0.0f;
-        for (uint32_t i = 0; i < n; ++i) {
-            g += step;
-            // Hard clamp protects ears and speakers; the meters show when it kicks in.
-            const float l = std::clamp(block[2 * i] * g, -1.0f, 1.0f);
-            const float r = std::clamp(block[2 * i + 1] * g, -1.0f, 1.0f);
-            block[2 * i] = l;
-            block[2 * i + 1] = r;
-            peakL = std::max(peakL, std::fabs(l));
-            peakR = std::max(peakR, std::fabs(r));
+        for (int k = 0; k < kMaxOutputs; ++k) {
+            float* block = target[k];
+            if (!block) continue;
+            float g = currentMaster_;
+            for (uint32_t i = 0; i < n; ++i) {
+                g += step;
+                // Hard clamp protects ears and speakers; the meters show when it kicks in.
+                const float l = std::clamp(block[2 * i] * g, -1.0f, 1.0f);
+                const float r = std::clamp(block[2 * i + 1] * g, -1.0f, 1.0f);
+                block[2 * i] = l;
+                block[2 * i + 1] = r;
+                peakL = std::max(peakL, std::fabs(l));
+                peakR = std::max(peakR, std::fabs(r));
+            }
+            if (k > 0) bus[k]->ring.write(block, n); // drops what doesn't fit; never blocks
         }
-        currentMaster_ = target;
+        currentMaster_ = targetGain;
         if (peakL > masterPeak_[0].load(std::memory_order_relaxed)) {
             masterPeak_[0].store(peakL, std::memory_order_relaxed);
         }

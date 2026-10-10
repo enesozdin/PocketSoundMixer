@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Channel.h"
+#include "StereoRingBuffer.h"
 
 #include <array>
 #include <atomic>
@@ -8,6 +9,14 @@
 #include <vector>
 
 namespace psm {
+
+// Feeds one extra output device. The audio thread writes the finished mix into the ring and
+// that device's own callback drains it, so every source is still read by one thread only.
+class OutputBus : public Retirable {
+public:
+    explicit OutputBus(uint32_t capacityFrames) : ring(capacityFrames) {}
+    StereoRingBuffer ring;
+};
 
 // Owns the channels and sums them into the output.
 //
@@ -19,6 +28,7 @@ class Mixer {
 public:
     static constexpr int kMaxChannels = 64;
     static constexpr uint32_t kMaxBlockFrames = 1024;
+    static constexpr int kMaxOutputs = 4; // 0 = the Master device, 1..3 = extra devices
 
     explicit Mixer(float sampleRate);
     ~Mixer();
@@ -31,13 +41,20 @@ public:
     // ---- UI thread ----
     Channel* addChannel(std::string name); // nullptr when kMaxChannels is reached
     void removeChannel(Channel* channel);
-    void replaceSource(Channel* channel, std::unique_ptr<AudioSource> source);
+    // Puts `source` in the channel's first free slot. Returns false (and drops it) when all are taken.
+    bool addSource(Channel* channel, std::unique_ptr<AudioSource> source);
+    void replaceSource(Channel* channel, int slot, std::unique_ptr<AudioSource> source);
+    void clearSources(Channel* channel);
     void collectGarbage();                 // call once per UI frame
     // Blocks (up to timeoutMs) until everything retired so far is freed. For the rare case where
     // an old object's destructor must finish before its replacement starts.
     void flushGarbage(int timeoutMs);
 
     const std::vector<Channel*>& channels() const { return order_; }
+
+    // Installs (or with nullptr removes) the bus for extra output `index` (1..kMaxOutputs-1).
+    // Channels whose `output` points at a missing bus play on the Master device.
+    void setOutputBus(int index, std::unique_ptr<OutputBus> bus);
 
     std::atomic<float> masterVolume{1.0f};
     float takeMasterPeak(int side) { return masterPeak_[side].exchange(0.0f, std::memory_order_relaxed); }
@@ -56,6 +73,7 @@ private:
 
     float sampleRate_;
     std::array<std::atomic<Channel*>, kMaxChannels> slots_;
+    std::array<std::atomic<OutputBus*>, kMaxOutputs> buses_{};
     std::vector<std::unique_ptr<Channel>> owned_;
     std::vector<Channel*> order_;
     std::vector<Retired> graveyard_;
@@ -63,7 +81,8 @@ private:
     std::atomic<float> masterPeak_[2] = {0.0f, 0.0f};
 
     // Audio thread state.
-    std::vector<float> scratch_;
+    std::vector<float> scratch_; // two blocks: channel sum + one source
+    std::vector<float> busScratch_; // one block per extra output
     float currentMaster_ = 0.0f;
 };
 

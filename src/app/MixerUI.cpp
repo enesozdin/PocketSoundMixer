@@ -3,6 +3,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -11,22 +12,40 @@ namespace psm {
 
 namespace {
 
-constexpr float kMinFaderDb = -60.0f; // fader bottom = silence
-constexpr float kMaxFaderDb = 6.0f;
-constexpr float kMeterFloorDb = -60.0f;
-constexpr float kMeterFallDbPerSec = 24.0f;
+constexpr float kMeterFallDbPerSec = 20.0f;
+constexpr float kMeterHoldSeconds = 1.5f;
+constexpr float kMeterFloorDb = -70.0f;
 constexpr float kStripWidth = 326.0f;
 constexpr float kSliderHeight = 160.0f;
 constexpr float kBandWidth = 22.0f;
+constexpr int kSourceRows = 3;
+const char* const kDefaultMicName = "Default microphone";
 
-float faderDbToLinear(float db)
+// Volume is shown as 0..100 %. The curve is squared so the fader feels even to the ear:
+// 50 % is about -12 dB (clearly quieter), 10 % about -40 dB (barely audible).
+float percentToGain(float pct)
 {
-    return db <= kMinFaderDb ? 0.0f : std::pow(10.0f, db / 20.0f);
+    const float x = std::clamp(pct, 0.0f, 100.0f) * 0.01f;
+    return x * x;
 }
 
-float linearToFaderDb(float lin)
+float gainToPercent(float gain)
 {
-    return lin <= 0.0f ? kMinFaderDb : std::clamp(20.0f * std::log10(lin), kMinFaderDb, kMaxFaderDb);
+    return std::sqrt(std::clamp(gain, 0.0f, 1.0f)) * 100.0f;
+}
+
+// IEC 60268-18 meter scale: the same non-linear scale as broadcast and DAW meters.
+// Normal music peaks (-12..-3 dBFS) fill 70..95 % of the bar instead of hugging the middle.
+float meterDeflection(float db)
+{
+    if (db < -70.0f) return 0.0f;
+    if (db < -60.0f) return (db + 70.0f) * 0.0025f;
+    if (db < -50.0f) return (db + 60.0f) * 0.005f + 0.025f;
+    if (db < -40.0f) return (db + 50.0f) * 0.0075f + 0.075f;
+    if (db < -30.0f) return (db + 40.0f) * 0.015f + 0.15f;
+    if (db < -20.0f) return (db + 30.0f) * 0.02f + 0.3f;
+    if (db < 0.0f) return (db + 20.0f) * 0.025f + 0.5f;
+    return 1.0f;
 }
 
 template <size_t N>
@@ -37,45 +56,20 @@ void copyToBuf(std::array<char, N>& buf, const std::string& s)
     buf[n] = '\0';
 }
 
-std::string fileStem(const std::string& utf8Path)
+bool equalsNoCase(const std::string& a, const std::string& b)
 {
-    const size_t slash = utf8Path.find_last_of("/\\");
-    std::string name = slash == std::string::npos ? utf8Path : utf8Path.substr(slash + 1);
-    const size_t dot = name.find_last_of('.');
-    return dot == std::string::npos || dot == 0 ? name : name.substr(0, dot);
+    return a.size() == b.size()
+        && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+               return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+           });
 }
 
-std::string formatTime(double seconds)
+// "Spotify.exe" -> "Spotify"
+std::string appDisplayName(const std::string& exe)
 {
-    const int s = static_cast<int>(seconds);
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%d:%02d", s / 60, s % 60);
-    return buf;
-}
-
-// Peak meters: falls smoothly, jumps up instantly. Returns true while it is still moving.
-bool updateMeter(float& displayDb, float peakLinear, float dt)
-{
-    const float peakDb = peakLinear > 0.0f ? 20.0f * std::log10(peakLinear) : -90.0f;
-    const float before = displayDb;
-    displayDb = std::max(peakDb, displayDb - kMeterFallDbPerSec * dt);
-    displayDb = std::max(displayDb, -90.0f);
-    return displayDb > kMeterFloorDb || before > kMeterFloorDb;
-}
-
-void drawMeterBar(ImDrawList* dl, ImVec2 min, ImVec2 max, float db, bool vertical)
-{
-    dl->AddRectFilled(min, max, IM_COL32(30, 30, 34, 255));
-    const float t = std::clamp((db - kMeterFloorDb) / (kMaxFaderDb - kMeterFloorDb), 0.0f, 1.0f);
-    if (t <= 0.0f) return;
-    const ImU32 col = db > -0.1f ? IM_COL32(230, 70, 60, 255)    // clipping
-                    : db > -6.0f ? IM_COL32(230, 200, 60, 255)   // hot
-                                 : IM_COL32(80, 200, 120, 255);
-    if (vertical) {
-        dl->AddRectFilled(ImVec2(min.x, max.y - (max.y - min.y) * t), max, col);
-    } else {
-        dl->AddRectFilled(min, ImVec2(min.x + (max.x - min.x) * t, max.y), col);
-    }
+    const size_t n = exe.size();
+    if (n > 4 && equalsNoCase(exe.substr(n - 4), ".exe")) return exe.substr(0, n - 4);
+    return exe;
 }
 
 bool toggleButton(const char* label, bool on, ImVec4 onColor, ImVec2 size)
@@ -92,6 +86,48 @@ bool toggleButton(const char* label, bool on, ImVec4 onColor, ImVec2 size)
 }
 
 } // namespace
+
+// Jumps up instantly, holds the peak line briefly, then falls smoothly. Returns true while moving.
+static bool updateMeter(float& db, float& holdDb, float& holdSeconds, float peakLinear, float dt)
+{
+    const float peakDb = peakLinear > 0.0f ? 20.0f * std::log10(peakLinear) : -90.0f;
+    db = std::max({peakDb, db - kMeterFallDbPerSec * dt, -90.0f});
+    if (peakDb >= holdDb) {
+        holdDb = peakDb;
+        holdSeconds = kMeterHoldSeconds;
+    } else if ((holdSeconds -= dt) <= 0.0f) {
+        holdDb = db;
+    }
+    return db > kMeterFloorDb || holdDb > kMeterFloorDb;
+}
+
+static void drawMeterBar(ImDrawList* dl, ImVec2 min, ImVec2 max, float db, float holdDb, bool vertical, bool dimmed)
+{
+    const ThemeColors& tc = themeColors();
+    dl->AddRectFilled(min, max, tc.meterBack);
+    const ImU32 alpha = dimmed ? 110u : 255u; // muted channel: still shows the signal, greyed out
+    const auto colorFor = [&tc, alpha](float d) {
+        const ImU32 c = d > -1.0f ? tc.meterLimit : d > -9.0f ? tc.meterLoud : tc.meterNormal;
+        return (c & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);
+    };
+    const float t = meterDeflection(db);
+    const float th = meterDeflection(holdDb);
+    if (vertical) {
+        const float h = max.y - min.y;
+        if (t > 0.0f) dl->AddRectFilled(ImVec2(min.x, max.y - h * t), max, colorFor(db));
+        if (th > 0.0f) {
+            const float y = max.y - h * th;
+            dl->AddRectFilled(ImVec2(min.x, y), ImVec2(max.x, y + 2.0f), colorFor(holdDb));
+        }
+    } else {
+        const float w = max.x - min.x;
+        if (t > 0.0f) dl->AddRectFilled(min, ImVec2(min.x + w * t, max.y), colorFor(db));
+        if (th > 0.0f) {
+            const float x = min.x + w * th;
+            dl->AddRectFilled(ImVec2(x - 2.0f, min.y), ImVec2(x, max.y), colorFor(holdDb));
+        }
+    }
+}
 
 MixerUI::MixerUI(AudioEngine& engine, PresetLibrary& presets, std::filesystem::path presetFile)
     : engine_(engine)
@@ -111,10 +147,11 @@ void MixerUI::applySession(const SessionConfig& session)
     engine_.mixer().masterVolume = session.masterVolume;
     appAutoRoute_ = session.appAutoRoute;
     appSilentOutput_ = session.appSilentOutput;
-    masterVolumeDb_ = linearToFaderDb(session.masterVolume);
+    masterVolumePct_ = gainToPercent(session.masterVolume);
+    setTheme(themeFromName(session.theme));
 
     for (const ChannelConfig& c : session.channels) {
-        Strip* s = addStrip(c.name);
+        Strip* s = addStrip(c.name, c.kind == "mic");
         if (!s) break;
         Channel& ch = *s->channel;
         // A saved custom curve wins over the preset, which may have been edited or deleted since.
@@ -129,16 +166,18 @@ void MixerUI::applySession(const SessionConfig& session)
             s->curveDirty = true;
         }
         ch.volume = c.volume;
-        s->volumeDb = linearToFaderDb(c.volume);
+        s->volumePct = gainToPercent(c.volume);
         ch.pan = c.pan;
         ch.mute = c.mute;
         ch.solo = c.solo;
-        if (c.sourceType == "file" && !c.filePath.empty()) {
-            loadFile(*s, c.filePath, c.loop);
-        } else if (c.sourceType == "input") {
-            loadInput(*s, c.inputDevice);
-        } else if (c.sourceType == "app" && !c.appExe.empty()) {
-            loadApp(*s, c.appExe);
+        s->outputDevice = c.output;
+        applyChannelOutput(*s); // before the apps, so none gets parked on this device
+        for (const SourceConfig& src : c.sources) {
+            if (src.type == "input") {
+                addInput(*s, src.inputDevice);
+            } else if (src.type == "app") {
+                addApp(*s, src.appExe);
+            }
         }
     }
 }
@@ -147,31 +186,30 @@ SessionConfig MixerUI::captureSession() const
 {
     SessionConfig session;
     session.masterVolume = engine_.mixer().masterVolume.load();
+    session.outputDevice = engine_.requestedOutput();
     session.appAutoRoute = appAutoRoute_;
     session.appSilentOutput = appSilentOutput_;
+    session.theme = themeName(theme_);
     for (const Strip& s : strips_) {
         const Channel& ch = *s.channel;
         ChannelConfig c;
         c.name = ch.name();
+        c.kind = s.isMic ? "mic" : "apps";
+        c.output = s.outputDevice;
         c.preset = s.preset;
         c.gainsDb = ch.gains();
         c.volume = ch.volume.load();
         c.pan = ch.pan.load();
         c.mute = ch.mute.load();
         c.solo = ch.solo.load();
-        if (AudioSource* src = ch.source()) {
-            if (src->kind() == SourceKind::File) {
-                const auto* f = static_cast<const FileSource*>(src);
-                c.sourceType = "file";
-                c.filePath = f->path();
-                c.loop = f->isLooping();
-            } else if (src->kind() == SourceKind::Input) {
-                const auto* in = static_cast<const InputSource*>(src);
-                c.sourceType = "input";
-                c.inputDevice = in->deviceName() == "Default input" ? "" : in->deviceName();
+        for (int i = 0; i < Channel::kMaxSources; ++i) {
+            const AudioSource* src = ch.source(i);
+            if (!src) continue;
+            if (src->kind() == SourceKind::Input) {
+                const std::string& name = static_cast<const InputSource*>(src)->deviceName();
+                c.sources.push_back({"input", {}, name == kDefaultMicName ? std::string() : name});
             } else if (src->kind() == SourceKind::App) {
-                c.sourceType = "app";
-                c.appExe = static_cast<const AppSource*>(src)->exeName();
+                c.sources.push_back({"app", static_cast<const AppSource*>(src)->exeName(), {}});
             }
         }
         session.channels.push_back(std::move(c));
@@ -182,7 +220,7 @@ SessionConfig MixerUI::captureSession() const
 // ---------------------------------------------------------------------------------------------
 // Actions
 
-MixerUI::Strip* MixerUI::addStrip(const std::string& name)
+MixerUI::Strip* MixerUI::addStrip(const std::string& name, bool isMic)
 {
     Channel* ch = engine_.mixer().addChannel(name);
     if (!ch) {
@@ -191,6 +229,7 @@ MixerUI::Strip* MixerUI::addStrip(const std::string& name)
     }
     Strip s;
     s.channel = ch;
+    s.isMic = isMic;
     copyToBuf(s.nameBuf, name);
     strips_.push_back(s);
     return &strips_.back();
@@ -200,39 +239,75 @@ void MixerUI::removeStrip(size_t index)
 {
     engine_.mixer().removeChannel(strips_[index].channel);
     strips_.erase(strips_.begin() + static_cast<std::ptrdiff_t>(index));
+    closeUnusedOutputs();
 }
 
-void MixerUI::loadFile(Strip& strip, const std::string& utf8Path, bool loop)
+void MixerUI::applyChannelOutput(Strip& strip)
 {
     std::string err;
-    std::unique_ptr<FileSource> src = engine_.openFile(utf8Path, &err);
-    if (!src) {
-        strip.error = err;
-        return;
-    }
-    src->setLooping(loop);
-    engine_.mixer().replaceSource(strip.channel, std::move(src));
-    copyToBuf(strip.pathBuf, utf8Path);
-    strip.error.clear();
+    strip.channel->output = engine_.outputFor(strip.outputDevice, &err);
+    strip.error = err; // on failure the choice is kept; it plays on Master meanwhile
 }
 
-void MixerUI::loadInput(Strip& strip, const std::string& deviceName)
+void MixerUI::closeUnusedOutputs()
 {
+    std::vector<int> inUse;
+    for (const Strip& s : strips_) {
+        inUse.push_back(s.channel->output.load());
+    }
+    engine_.closeUnusedOutputs(inUse);
+}
+
+std::vector<std::string> MixerUI::outputsInUse() const
+{
+    std::vector<std::string> names{engine_.outputDeviceName()};
+    for (const Strip& s : strips_) {
+        if (!s.outputDevice.empty() && s.channel->output.load() > 0) names.push_back(s.outputDevice);
+    }
+    return names;
+}
+
+void MixerUI::addInput(Strip& strip, const std::string& deviceName)
+{
+    engine_.mixer().clearSources(strip.channel); // a mic channel holds one microphone
     std::string err;
     std::unique_ptr<InputSource> src = engine_.openInput(deviceName, &err);
     if (!src) {
         strip.error = err;
         return;
     }
-    engine_.mixer().replaceSource(strip.channel, std::move(src));
+    engine_.mixer().addSource(strip.channel, std::move(src));
     strip.error.clear();
 }
 
-void MixerUI::loadApp(Strip& strip, const std::string& exeName)
+MixerUI::Strip* MixerUI::findAppStrip(const std::string& exeName, int* slot)
 {
-    if (AudioSource* old = strip.channel->source(); old && old->kind() == SourceKind::App) {
-        engine_.mixer().replaceSource(strip.channel, nullptr);
-        engine_.mixer().flushGarbage(200); // same reason as in reopenAppChannels()
+    for (Strip& s : strips_) {
+        for (int i = 0; i < Channel::kMaxSources; ++i) {
+            const AudioSource* src = s.channel->source(i);
+            if (src && src->kind() == SourceKind::App && equalsNoCase(static_cast<const AppSource*>(src)->exeName(), exeName)) {
+                *slot = i;
+                return &s;
+            }
+        }
+    }
+    return nullptr;
+}
+
+void MixerUI::addApp(Strip& strip, const std::string& exeName)
+{
+    // An app lives in one channel only; picking it again moves it here.
+    int oldSlot = -1;
+    if (Strip* owner = findAppStrip(exeName, &oldSlot)) {
+        if (owner == &strip) return;
+        engine_.mixer().replaceSource(owner->channel, oldSlot, nullptr);
+        // The old capture must put the app's output back before the new one reads it,
+        // or the new one would remember the parked device as the app's own setting.
+        engine_.mixer().flushGarbage(200);
+    }
+    if (strip.channel->freeSourceSlot() < 0) {
+        strip.error = "This channel is full (" + std::to_string(Channel::kMaxSources) + " sources)";
+        return;
     }
     std::string err;
     std::unique_ptr<AppSource> src = engine_.openApp(exeName, silentOutputId(), &err);
@@ -240,87 +315,153 @@ void MixerUI::loadApp(Strip& strip, const std::string& exeName)
         strip.error = err;
         return;
     }
-    engine_.mixer().replaceSource(strip.channel, std::move(src));
+    engine_.mixer().addSource(strip.channel, std::move(src));
     strip.error.clear();
+}
+
+void MixerUI::setTheme(Theme theme)
+{
+    theme_ = theme;
+    applyTheme(theme, uiScale_);
+}
+
+void MixerUI::resetChannels()
+{
+    // Back to the six default channels; the Master output, volume and theme stay as they are.
+    SessionConfig fresh = defaultSession();
+    const SessionConfig current = captureSession();
+    fresh.masterVolume = current.masterVolume;
+    fresh.outputDevice = current.outputDevice;
+    fresh.theme = current.theme;
+    fresh.appAutoRoute = current.appAutoRoute;
+    fresh.appSilentOutput = current.appSilentOutput;
+    while (!strips_.empty()) {
+        removeStrip(strips_.size() - 1);
+    }
+    engine_.mixer().flushGarbage(200); // removed apps get their own output back before anything new starts
+    applySession(fresh);
+}
+
+void MixerUI::removeSource(Strip& strip, int slot)
+{
+    engine_.mixer().replaceSource(strip.channel, slot, nullptr);
 }
 
 std::string MixerUI::silentOutputId()
 {
     if (!appAutoRoute_) return {};
     if (outputDevices_.empty()) outputDevices_ = listOutputDevices();
+    const std::vector<std::string> inUse = outputsInUse(); // never park apps where you listen
     if (!appSilentOutput_.empty()) {
         for (const OutputDeviceInfo& d : outputDevices_) {
-            if (d.name == appSilentOutput_ && !d.isDefault) return d.id;
+            if (d.name == appSilentOutput_ && !d.isDefault && std::find(inUse.begin(), inUse.end(), d.name) == inUse.end()) {
+                return d.id;
+            }
         }
     }
-    return pickSilentOutputId(outputDevices_);
+    return pickSilentOutputId(outputDevices_, inUse);
 }
 
 void MixerUI::reopenAppChannels()
 {
-    // Routing settings changed: restart app channels so they pick up the new setting.
+    // Routing settings changed: restart app captures so they pick up the new setting.
     // Destroying the old source restores the app's output first.
     for (Strip& s : strips_) {
-        if (AudioSource* src = s.channel->source(); src && src->kind() == SourceKind::App) {
-            const std::string exe = static_cast<AppSource*>(src)->exeName();
-            engine_.mixer().replaceSource(s.channel, nullptr);
-            // The old capture must put the app's output back before the new one reads it,
-            // or the new one would remember the parked device as the app's own setting.
-            engine_.mixer().flushGarbage(200);
-            loadApp(s, exe);
+        for (int i = 0; i < Channel::kMaxSources; ++i) {
+            const AudioSource* src = s.channel->source(i);
+            if (!src || src->kind() != SourceKind::App) continue;
+            const std::string exe = static_cast<const AppSource*>(src)->exeName();
+            engine_.mixer().replaceSource(s.channel, i, nullptr);
+            engine_.mixer().flushGarbage(200); // see addApp()
+            std::string err;
+            if (auto fresh = engine_.openApp(exe, silentOutputId(), &err)) {
+                engine_.mixer().replaceSource(s.channel, i, std::move(fresh));
+            } else {
+                s.error = err;
+            }
         }
     }
 }
 
-void MixerUI::drawAppRoutingSettings()
+void MixerUI::selectOutput(const std::string& name)
 {
-    if (ImGui::Checkbox("Hear apps only through the mixer", &appAutoRoute_)) {
-        reopenAppChannels();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Moves the app's own sound to a spare output while it is in a channel,\n"
-                          "so you don't hear it twice. Put back when the channel is removed.");
-    }
-    if (!appAutoRoute_) {
-        if (ImGui::Button("Open Windows sound settings")) openAppVolumeSettings();
-        return;
-    }
-    const std::string current = silentOutputId();
-    if (current.empty()) {
-        ImGui::PushTextWrapPos(380.0f);
-        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
-                           "This PC has only one output device, so captured apps also play directly. "
-                           "Connect a second output (a monitor with audio, a USB headset) or install the free VB-Cable driver.");
-        ImGui::PopTextWrapPos();
-        return;
-    }
-    std::string currentName;
+    std::string err;
+    engine_.setOutputDevice(name, &err);
+    status_ = err;
+    // A channel may have picked the device that is now the Master: it then plays through Master.
+    for (Strip& s : strips_) applyChannelOutput(s);
+    closeUnusedOutputs();
+    // The spare output for parked apps must never be the one the mixer now plays on.
+    outputDevices_.clear();
+    reopenAppChannels();
+}
+
+std::string MixerUI::spareOutputName()
+{
+    const std::string id = silentOutputId();
     for (const OutputDeviceInfo& d : outputDevices_) {
-        if (d.id == current) currentName = d.name;
+        if (d.id == id) return d.name;
     }
-    ImGui::TextDisabled("Spare output for app sound:");
-    ImGui::SetNextItemWidth(320.0f);
-    const std::string label = appSilentOutput_.empty() ? "Automatic (" + currentName + ")" : currentName;
-    if (ImGui::BeginCombo("##silent", label.c_str())) {
-        if (ImGui::Selectable("Automatic", appSilentOutput_.empty())) {
+    return {};
+}
+
+void MixerUI::drawSpareOutputCombo()
+{
+    // Captured apps' own sound is moved ("parked") here, so you hear them only through the mixer.
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Spare output");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Apps in a channel have their own sound moved to this device, so you\n"
+                          "hear them only once, through the mixer. Pick a device you don't listen to,\n"
+                          "e.g. monitor/HDMI audio. Apps go back to normal when removed from a channel.");
+    }
+    ImGui::SameLine();
+    const std::string spare = spareOutputName();
+    std::string label;
+    if (!appAutoRoute_) label = "Off (apps also play directly)";
+    else if (spare.empty()) label = "None available (apps also play directly)";
+    else if (!appSilentOutput_.empty() && spare == appSilentOutput_) label = spare;
+    else label = "Automatic (" + spare + ")";
+
+    ImGui::SetNextItemWidth(280.0f);
+    if (ImGui::BeginCombo("##spare", label.c_str())) {
+        if (ImGui::IsWindowAppearing()) outputDevices_ = listOutputDevices();
+        const std::vector<std::string> inUse = outputsInUse();
+        if (ImGui::Selectable("Automatic", appAutoRoute_ && appSilentOutput_.empty())) {
+            appAutoRoute_ = true;
             appSilentOutput_.clear();
             reopenAppChannels();
         }
+        int offered = 0;
         for (const OutputDeviceInfo& d : outputDevices_) {
-            if (d.isDefault) continue; // that's where the mixer plays
-            if (ImGui::Selectable(d.name.c_str(), d.name == appSilentOutput_)) {
+            if (d.isDefault || std::find(inUse.begin(), inUse.end(), d.name) != inUse.end()) continue; // you listen there
+            ++offered;
+            if (ImGui::Selectable(d.name.c_str(), appAutoRoute_ && d.name == appSilentOutput_)) {
+                appAutoRoute_ = true;
                 appSilentOutput_ = d.name;
                 reopenAppChannels();
             }
         }
+        if (offered == 0) {
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 320.0f);
+            ImGui::TextColored(themeColors().warningText,
+                               "No spare device: every output is one you listen on. Connect a second output "
+                               "(a monitor with audio, a USB headset) or install the free VB-Cable driver.");
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::Separator();
+        if (ImGui::Selectable("Off (apps also play directly)", !appAutoRoute_)) {
+            appAutoRoute_ = false;
+            reopenAppChannels();
+        }
+        if (ImGui::Selectable("Reset all app outputs")) {
+            resetAllAppOutputs();
+            reopenAppChannels();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Puts every app back on your normal output, like Windows' own Reset button.");
+        }
         ImGui::EndCombo();
-    }
-    if (ImGui::SmallButton("Reset all app outputs")) {
-        resetAllAppOutputs();
-        reopenAppChannels();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Puts every app back on your normal output, like Windows' own Reset button.");
     }
 }
 
@@ -353,25 +494,6 @@ void MixerUI::savePresets()
     }
 }
 
-void MixerUI::onFilesDropped(const std::vector<std::string>& utf8Paths, float x, float y)
-{
-    for (size_t i = 0; i < utf8Paths.size(); ++i) {
-        Strip* target = nullptr;
-        if (i == 0) { // first file goes to the strip under the cursor
-            for (Strip& s : strips_) {
-                if (x >= s.rectMin[0] && x <= s.rectMax[0] && y >= s.rectMin[1] && y <= s.rectMax[1]) {
-                    target = &s;
-                    break;
-                }
-            }
-        }
-        if (!target) {
-            target = addStrip(fileStem(utf8Paths[i]));
-            if (!target) return;
-        }
-        loadFile(*target, utf8Paths[i], true);
-    }
-}
 
 // ---------------------------------------------------------------------------------------------
 // Drawing
@@ -388,8 +510,9 @@ void MixerUI::draw(float dt)
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings
                      | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    drawTopBar(dt);
+    drawMasterBar(dt);
     ImGui::Separator();
+    drawToolBar();
 
     // Strips wrap into rows that fill the window width; extra rows scroll vertically,
     // so every channel stays visible without a sideways scrollbar.
@@ -405,7 +528,7 @@ void MixerUI::draw(float dt)
         scrollToNewStrip_ = false;
     }
     if (strips_.empty()) {
-        ImGui::TextDisabled("No channels. Click \"+ Add channel\" or drop audio files here.");
+        ImGui::TextDisabled("No channels. Click \"+ Add channel\".");
     }
     ImGui::EndChild();
 
@@ -416,50 +539,104 @@ void MixerUI::draw(float dt)
 
     ImGui::End();
 
-    if (showPresetManager_) {
-        drawPresetManager();
-    }
+    if (showPresetManager_) drawPresetManager();
+    if (showHelp_) drawHelp();
 }
 
-void MixerUI::drawTopBar(float dt)
+void MixerUI::drawMasterBar(float dt)
 {
     Mixer& mixer = engine_.mixer();
 
-    if (ImGui::Button("+ Add channel")) {
-        if (addStrip("Channel " + std::to_string(strips_.size() + 1))) {
-            scrollToNewStrip_ = true;
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Master output");
+    ImGui::SameLine();
+
+    // Where everything you hear comes out. "System default" follows Windows' default device.
+    const std::string& requested = engine_.requestedOutput();
+    const std::string label = requested.empty() ? "System default (" + engine_.outputDeviceName() + ")" : engine_.outputDeviceName();
+    ImGui::SetNextItemWidth(300.0f);
+    if (ImGui::BeginCombo("##output", label.c_str())) {
+        if (ImGui::IsWindowAppearing()) playbackDevices_ = engine_.outputDeviceNames();
+        if (ImGui::Selectable("System default", requested.empty())) {
+            selectOutput({});
         }
+        for (const std::string& name : playbackDevices_) {
+            if (ImGui::Selectable(name.c_str(), name == requested)) {
+                selectOutput(name);
+            }
+        }
+        ImGui::EndCombo();
     }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Speakers or headphones the mixer plays on");
+
     ImGui::SameLine();
-    if (ImGui::Button("Presets")) {
-        showPresetManager_ = !showPresetManager_;
+    ImGui::SetNextItemWidth(200.0f);
+    // NoInput: a double-click must not turn the fader into a text box.
+    if (ImGui::SliderFloat("##master", &masterVolumePct_, 0.0f, 100.0f, "Volume %.0f%%", ImGuiSliderFlags_NoInput)) {
+        mixer.masterVolume = percentToGain(masterVolumePct_);
     }
-    ImGui::SameLine();
-    ImGui::TextUnformatted("Master");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(220.0f);
-    if (ImGui::SliderFloat("##master", &masterVolumeDb_, kMinFaderDb, kMaxFaderDb,
-                           masterVolumeDb_ <= kMinFaderDb ? "-inf dB" : "%.1f dB")) {
-        mixer.masterVolume = faderDbToLinear(masterVolumeDb_);
-    }
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        masterVolumeDb_ = 0.0f;
-        mixer.masterVolume = 1.0f;
-    }
+
     ImGui::SameLine();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetFrameHeight();
     for (int side = 0; side < 2; ++side) {
-        animating_ |= updateMeter(masterMeterDb_[side], mixer.takeMasterPeak(side), dt);
+        Meter& m = masterMeter_[side];
+        animating_ |= updateMeter(m.db, m.holdDb, m.holdSeconds, mixer.takeMasterPeak(side), dt);
         const float y0 = p.y + side * (h * 0.5f);
-        drawMeterBar(ImGui::GetWindowDrawList(), ImVec2(p.x, y0 + 1), ImVec2(p.x + 200.0f, y0 + h * 0.5f - 1), masterMeterDb_[side], false);
+        drawMeterBar(ImGui::GetWindowDrawList(), ImVec2(p.x, y0 + 1), ImVec2(p.x + 240.0f, y0 + h * 0.5f - 1), m.db, m.holdDb, false, false);
     }
-    ImGui::Dummy(ImVec2(200.0f, h));
+    ImGui::Dummy(ImVec2(240.0f, h));
+    if (appCaptureSupported()) {
+        ImGui::SameLine(0.0f, 24.0f);
+        drawSpareOutputCombo();
+    }
+}
+
+void MixerUI::drawToolBar()
+{
+    if (ImGui::Button("+ Add channel")) {
+        if (addStrip("Channel " + std::to_string(strips_.size() + 1), false)) {
+            scrollToNewStrip_ = true;
+        }
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("A new channel for apps");
     ImGui::SameLine();
-    ImGui::TextDisabled("%s  |  %u Hz", engine_.outputDeviceName().c_str(), engine_.sampleRate());
+    if (ImGui::Button("+ Add mic channel")) {
+        if (Strip* s = addStrip("Mic", true)) {
+            s->channel->mute = true; // never surprise anyone with their own voice on the speakers
+            addInput(*s, "");
+            scrollToNewStrip_ = true;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Presets")) showPresetManager_ = !showPresetManager_;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(120.0f);
+    if (ImGui::BeginCombo("##theme", themeName(theme_))) {
+        for (Theme t : {Theme::Dark, Theme::Midnight, Theme::Light}) {
+            if (ImGui::Selectable(themeName(t), t == theme_)) setTheme(t);
+        }
+        ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Theme");
+    ImGui::SameLine();
+    if (ImGui::Button("Reset channels")) ImGui::OpenPopup("reset");
+    if (ImGui::BeginPopup("reset")) {
+        ImGui::TextUnformatted("Replace all channels with the six default ones?");
+        ImGui::TextDisabled("Music, Game, Film, Chat, Podcast and Mic. Your apps go back to normal.");
+        if (ImGui::Button("Reset")) {
+            resetChannels();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Help")) showHelp_ = !showHelp_;
     if (!status_.empty()) {
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s", status_.c_str());
+        ImGui::TextColored(themeColors().errorText, "%s", status_.c_str());
     }
 }
 
@@ -468,12 +645,6 @@ void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
     Channel& ch = *strip.channel;
     ImGui::PushID(strip.channel);
     ImGui::BeginChild("strip", ImVec2(kStripWidth, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
-    const ImVec2 wp = ImGui::GetWindowPos();
-    const ImVec2 ws = ImGui::GetWindowSize();
-    strip.rectMin[0] = wp.x;
-    strip.rectMin[1] = wp.y;
-    strip.rectMax[0] = wp.x + ws.x;
-    strip.rectMax[1] = wp.y + ws.y;
 
     // Name + remove.
     ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);
@@ -495,7 +666,9 @@ void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
         ImGui::EndPopup();
     }
 
-    drawSourceRow(strip);
+    if (strip.isMic) drawMicSource(strip);
+    else drawAppSources(strip);
+    drawOutputRow(strip);
     drawPresetRow(strip);
     if (strip.curveDirty) {
         updateCurve(strip);
@@ -504,52 +677,47 @@ void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
 
     drawEq(strip);
 
-    // Fader + meters on the right of the EQ.
+    // Volume fader + meters on the right of the EQ.
     ImGui::SameLine();
     ImGui::BeginGroup();
-    if (ImGui::VSliderFloat("##vol", ImVec2(26.0f, kSliderHeight), &strip.volumeDb, kMinFaderDb, kMaxFaderDb, "")) {
-        ch.volume = faderDbToLinear(strip.volumeDb);
-    }
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        strip.volumeDb = 0.0f;
-        ch.volume = 1.0f;
+    if (ImGui::VSliderFloat("##vol", ImVec2(30.0f, kSliderHeight), &strip.volumePct, 0.0f, 100.0f, "", ImGuiSliderFlags_NoInput)) {
+        ch.volume = percentToGain(strip.volumePct);
     }
     if (ImGui::IsItemActive() || ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(strip.volumeDb <= kMinFaderDb ? "-inf dB" : "%.1f dB", strip.volumeDb);
+        ImGui::SetTooltip("Volume %.0f%%", strip.volumePct);
     }
-    ImGui::TextUnformatted("Vol");
+    ImGui::Text("%3.0f%%", strip.volumePct);
     ImGui::EndGroup();
 
     ImGui::SameLine();
+    const bool muted = ch.mute.load();
     const ImVec2 mp = ImGui::GetCursorScreenPos();
     for (int side = 0; side < 2; ++side) {
-        animating_ |= updateMeter(strip.meterDb[side], ch.takePeak(side), dt);
-        const float x0 = mp.x + side * 7.0f;
-        drawMeterBar(ImGui::GetWindowDrawList(), ImVec2(x0, mp.y), ImVec2(x0 + 5.0f, mp.y + kSliderHeight), strip.meterDb[side], true);
+        Meter& m = strip.meter[side];
+        animating_ |= updateMeter(m.db, m.holdDb, m.holdSeconds, ch.takePeak(side), dt);
+        const float x0 = mp.x + side * 8.0f;
+        drawMeterBar(ImGui::GetWindowDrawList(), ImVec2(x0, mp.y), ImVec2(x0 + 6.0f, mp.y + kSliderHeight), m.db, m.holdDb, true, muted);
     }
     ImGui::Dummy(ImVec2(14.0f, kSliderHeight));
 
     // Pan, mute, solo.
     float pan = ch.pan.load();
     ImGui::SetNextItemWidth(140.0f);
-    if (ImGui::SliderFloat("##pan", &pan, -1.0f, 1.0f, pan == 0.0f ? "Center" : (pan < 0 ? "L %.2f" : "R %.2f"))) {
-        ch.pan = pan;
-    }
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        ch.pan = 0.0f;
+    if (ImGui::SliderFloat("##pan", &pan, -1.0f, 1.0f, pan == 0.0f ? "Center" : (pan < 0 ? "Left %.2f" : "Right %.2f"),
+                           ImGuiSliderFlags_NoInput)) {
+        ch.pan = std::fabs(pan) < 0.05f ? 0.0f : pan; // snaps to center, so it is easy to hit
     }
     ImGui::SameLine();
-    const bool muted = ch.mute.load();
-    if (toggleButton("M", muted, ImVec4(0.75f, 0.25f, 0.2f, 1.0f), ImVec2(32, 0))) ch.mute = !muted;
+    if (toggleButton("M", muted, themeColors().muteOn, ImVec2(32, 0))) ch.mute = !muted;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mute");
     ImGui::SameLine();
     const bool soloed = ch.solo.load();
-    if (toggleButton("S", soloed, ImVec4(0.8f, 0.65f, 0.1f, 1.0f), ImVec2(32, 0))) ch.solo = !soloed;
+    if (toggleButton("S", soloed, themeColors().soloOn, ImVec2(32, 0))) ch.solo = !soloed;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Solo: only soloed channels play");
 
     if (!strip.error.empty()) {
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", strip.error.c_str());
+        ImGui::TextColored(themeColors().errorText, "%s", strip.error.c_str());
         ImGui::PopTextWrapPos();
     }
 
@@ -557,100 +725,79 @@ void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
     ImGui::PopID();
 }
 
-void MixerUI::drawSourceRow(Strip& strip)
+void MixerUI::drawAppSources(Strip& strip)
 {
     Channel& ch = *strip.channel;
-    AudioSource* src = ch.source();
 
-    // Fixed three-row layout so every strip's EQ lines up, whatever its source.
-    if (src && src->kind() == SourceKind::File) {
-        auto* f = static_cast<FileSource*>(src);
-        ImGui::TextDisabled("File: %s", fileStem(f->path()).c_str());
-        const bool playing = f->isPlaying();
-        if (ImGui::Button(playing ? "Pause" : "Play", ImVec2(52, 0))) {
-            f->setPlaying(!playing);
+    // Fixed-height list so every strip's EQ lines up; more than three apps scroll.
+    const float rowH = ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginChild("sources", ImVec2(-1.0f, rowH * kSourceRows), ImGuiChildFlags_None);
+    int shown = 0;
+    for (int i = 0; i < Channel::kMaxSources; ++i) {
+        AudioSource* src = ch.source(i);
+        if (!src || src->kind() != SourceKind::App) continue;
+        ++shown;
+        ImGui::PushID(i);
+        if (ImGui::SmallButton("x")) {
+            removeSource(strip, i);
+            ImGui::PopID();
+            continue;
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove from this channel");
         ImGui::SameLine();
-        bool loop = f->isLooping();
-        if (ImGui::Checkbox("Loop", &loop)) {
-            f->setLooping(loop);
+        ImGui::AlignTextToFramePadding();
+        const auto* app = static_cast<AppSource*>(src);
+        const std::string name = appDisplayName(app->exeName());
+        switch (app->state()) {
+        case AppSource::State::Capturing:
+            ImGui::Text("%s", name.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled(app->isRerouted() ? "(only via mixer)" : "(playing)");
+            break;
+        case AppSource::State::WaitingForApp:
+            ImGui::Text("%s", name.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled("(waiting for it to start)");
+            break;
+        case AppSource::State::Failed:
+            ImGui::TextColored(themeColors().errorText, "%s: %s", name.c_str(), app->lastError().c_str());
+            break;
         }
-        ImGui::SameLine();
-        const double rate = engine_.sampleRate();
-        const uint64_t len = f->lengthFrames();
-        if (len > 0) {
-            float pos = static_cast<float>(static_cast<double>(f->cursorFrames()) / static_cast<double>(len));
-            const std::string label = formatTime(static_cast<double>(f->cursorFrames()) / rate) + " / " + formatTime(static_cast<double>(len) / rate);
-            ImGui::SetNextItemWidth(-1.0f);
-            if (ImGui::SliderFloat("##seek", &pos, 0.0f, 1.0f, label.c_str())) {
-                f->requestSeek(static_cast<uint64_t>(pos * static_cast<double>(len)));
-            }
-        } else {
-            ImGui::TextDisabled("%s", formatTime(static_cast<double>(f->cursorFrames()) / rate).c_str());
-        }
-        animating_ |= playing;
-    } else {
-        if (src && src->kind() == SourceKind::Input) {
-            ImGui::TextDisabled("Live input: %s", static_cast<InputSource*>(src)->deviceName().c_str());
-        } else if (src && src->kind() == SourceKind::App) {
-            const auto* app = static_cast<AppSource*>(src);
-            switch (app->state()) {
-            case AppSource::State::Capturing:
-                ImGui::TextDisabled("App: %s (%s)", app->exeName().c_str(),
-                                    app->isRerouted() ? "only via mixer" : "capturing");
-                break;
-            case AppSource::State::WaitingForApp:
-                ImGui::TextDisabled("App: %s (waiting for it to start)", app->exeName().c_str());
-                break;
-            case AppSource::State::Failed:
-                ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "App: %s", app->lastError().c_str());
-                break;
-            }
-        } else {
-            ImGui::TextDisabled("No source. Drop an audio file here.");
-        }
-        ImGui::Dummy(ImVec2(0.0f, ImGui::GetFrameHeight()));
+        ImGui::PopID();
     }
+    if (shown == 0) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled(appCaptureSupported() ? "No apps yet. Click \"+ App\" to add one or more."
+                                                  : "Putting apps in channels works on Windows only for now.");
+        ImGui::PopTextWrapPos();
+    }
+    ImGui::EndChild();
 
-    if (ImGui::Button("File...")) {
-        ImGui::OpenPopup("file");
+    ImGui::BeginDisabled(!appCaptureSupported());
+    if (ImGui::Button("+ App")) {
+        audioApps_ = listAudioApps();
+        outputDevices_ = listOutputDevices();
+        appExeBuf_[0] = '\0';
+        ImGui::OpenPopup("app");
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Input...")) {
-        captureDevices_ = engine_.captureDeviceNames();
-        ImGui::OpenPopup("input");
-    }
-    if (appCaptureSupported()) {
+    ImGui::EndDisabled();
+    if (shown > 1) {
         ImGui::SameLine();
-        if (ImGui::Button("App...")) {
-            audioApps_ = listAudioApps();
-            outputDevices_ = listOutputDevices();
-            appExeBuf_[0] = '\0';
-            ImGui::OpenPopup("app");
-        }
-    }
-    if (src) {
-        ImGui::SameLine();
-        if (ImGui::Button("Clear")) {
-            engine_.mixer().replaceSource(&ch, nullptr);
+        if (ImGui::Button("Clear all")) {
+            engine_.mixer().clearSources(&ch);
         }
     }
 
-    if (ImGui::BeginPopup("file")) {
-        ImGui::TextUnformatted("WAV, MP3 or FLAC path (or drag a file onto the strip):");
-        ImGui::SetNextItemWidth(420.0f);
-        const bool enter = ImGui::InputText("##path", strip.pathBuf.data(), strip.pathBuf.size(), ImGuiInputTextFlags_EnterReturnsTrue);
-        if (ImGui::Button("Load") || enter) {
-            loadFile(strip, strip.pathBuf.data(), true);
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
     if (ImGui::BeginPopup("app")) {
-        ImGui::TextUnformatted("Apps playing sound now:");
+        ImGui::TextUnformatted("Apps playing sound now (pick as many as you like):");
         for (const AudioAppInfo& app : audioApps_) {
-            if (ImGui::Selectable(app.displayName.c_str())) {
-                loadApp(strip, app.exeName);
+            int slot = -1;
+            const Strip* owner = findAppStrip(app.exeName, &slot);
+            std::string label = app.displayName;
+            if (owner == &strip) label += "  (in this channel)";
+            else if (owner) label += "  (in " + owner->channel->name() + ", moves here)";
+            if (ImGui::Selectable(label.c_str(), owner == &strip, ImGuiSelectableFlags_NoAutoClosePopups)) {
+                addApp(strip, app.exeName);
             }
         }
         if (audioApps_.empty()) {
@@ -660,34 +807,165 @@ void MixerUI::drawSourceRow(Strip& strip)
         const bool enter = ImGui::InputTextWithHint("##exe", "e.g. Spotify.exe", appExeBuf_.data(), appExeBuf_.size(),
                                                     ImGuiInputTextFlags_EnterReturnsTrue);
         ImGui::SameLine();
-        if ((ImGui::Button("Use") || enter) && appExeBuf_[0] != '\0') {
-            loadApp(strip, appExeBuf_.data());
-            ImGui::CloseCurrentPopup();
+        if ((ImGui::Button("Add") || enter) && appExeBuf_[0] != '\0') {
+            addApp(strip, appExeBuf_.data());
+            appExeBuf_[0] = '\0';
         }
         ImGui::Separator();
-        drawAppRoutingSettings();
+        const std::string spare = appAutoRoute_ ? spareOutputName() : std::string();
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 380.0f);
+        if (spare.empty()) {
+            ImGui::TextColored(themeColors().warningText, "The app's own sound also keeps playing, so you may hear it twice. "
+                                                          "Set \"Spare output\" at the top.");
+        } else {
+            ImGui::TextDisabled("The app's own sound is moved to \"%s\", so you hear it only through the mixer. "
+                                "Change it with \"Spare output\" at the top.", spare.c_str());
+        }
+        ImGui::PopTextWrapPos();
         ImGui::EndPopup();
     }
-    if (ImGui::BeginPopup("input")) {
-        if (ImGui::Selectable("Default input")) {
-            loadInput(strip, "");
-        }
+}
+
+void MixerUI::drawMicSource(Strip& strip)
+{
+    Channel& ch = *strip.channel;
+    const float rowH = ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginChild("sources", ImVec2(-1.0f, rowH * kSourceRows), ImGuiChildFlags_None);
+
+    const AudioSource* src = ch.source(0);
+    for (int i = 1; !src && i < Channel::kMaxSources; ++i) src = ch.source(i);
+    const std::string current = src && src->kind() == SourceKind::Input
+                              ? static_cast<const InputSource*>(src)->deviceName()
+                              : std::string("None");
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Microphone");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##mic", current.c_str())) {
+        if (ImGui::IsWindowAppearing()) captureDevices_ = engine_.captureDeviceNames();
+        if (ImGui::Selectable(kDefaultMicName, current == kDefaultMicName)) addInput(strip, "");
         for (const std::string& name : captureDevices_) {
-            if (ImGui::Selectable(name.c_str())) {
-                loadInput(strip, name);
+            if (ImGui::Selectable(name.c_str(), name == current)) addInput(strip, name);
+        }
+        if (captureDevices_.empty()) ImGui::TextDisabled("No microphones found");
+        ImGui::Separator();
+        if (ImGui::Selectable("None", src == nullptr)) engine_.mixer().clearSources(&ch);
+        ImGui::EndCombo();
+    }
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled(ch.mute.load() ? "Muted: the bar shows your mic works. Unmute (M) to hear yourself; use headphones."
+                                       : "You hear yourself now. Use headphones, or mute (M) to stop the echo.");
+    ImGui::PopTextWrapPos();
+    ImGui::EndChild();
+    ImGui::Dummy(ImVec2(0.0f, ImGui::GetFrameHeight())); // lines up with the "+ App" row of app channels
+}
+
+void MixerUI::drawOutputRow(Strip& strip)
+{
+    // Where this channel plays. Automatic follows the Master output; a picked device stays picked.
+    const bool following = strip.outputDevice.empty();
+    std::string label = following ? "Automatic (Master)" : strip.outputDevice;
+    if (!following && strip.channel->output.load() == 0 && strip.outputDevice != engine_.outputDeviceName()) {
+        label += " (not connected)";
+    }
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Output");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##chout", label.c_str())) {
+        if (ImGui::IsWindowAppearing()) playbackDevices_ = engine_.outputDeviceNames();
+        std::string pick;
+        bool picked = false;
+        if (ImGui::Selectable("Automatic (Master)", following)) {
+            picked = true;
+        }
+        for (const std::string& name : playbackDevices_) {
+            if (ImGui::Selectable(name.c_str(), name == strip.outputDevice)) {
+                pick = name;
+                picked = true;
             }
         }
-        if (captureDevices_.empty()) {
-            ImGui::TextDisabled("No input devices found");
+        ImGui::EndCombo();
+        if (picked && pick != strip.outputDevice) {
+            strip.outputDevice = pick;
+            applyChannelOutput(strip);
+            closeUnusedOutputs();
+            reopenAppChannels(); // a parked app may sit on the device this channel now uses
         }
-        ImGui::EndPopup();
     }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Speakers or headphones this channel plays on");
+}
+
+void MixerUI::drawHelp()
+{
+    // Docked to the right edge and sized from the main window every frame, so it follows resizes.
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float width = std::min(vp->WorkSize.x, std::max(vp->WorkSize.x * 0.38f, 380.0f * uiScale_));
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - width, vp->WorkPos.y), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(width, vp->WorkSize.y), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(1.0f); // the strips behind must not show through the text
+    if (!ImGui::Begin("Help", &showHelp_, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse
+                                              | ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::End();
+        return;
+    }
+    // Bullet + TextWrapped: BulletText never wraps in Dear ImGui.
+    const auto item = [](const char* text) {
+        ImGui::Bullet();
+        ImGui::TextWrapped("%s", text);
+    };
+    ImGui::SeparatorText("Master (top row)");
+    item("Master output: where you listen. \"System default\" follows Windows; or pick your headphones or speakers.");
+    item("Volume: the whole mix, 0-100%. The bar next to it shows how loud everything is together.");
+
+    ImGui::SeparatorText("Buttons under it");
+    item("+ Add channel: a new channel for apps.");
+    item("+ Add mic channel: a channel for a microphone.");
+    item("Presets: rename or delete presets, or restore deleted built-in ones.");
+    item("Theme: Dark, Midnight or Light.");
+    item("Reset channels: back to Music, Game, Film, Chat, Podcast and Mic.");
+
+    ImGui::SeparatorText("App channels");
+    item("\"+ App\" puts apps in a channel. Pick as many as you like, e.g. Spotify and a browser in Music.");
+    item("An app can be in one channel at a time. Picking it in another channel moves it there.");
+    item("A closed app shows \"waiting for it to start\" and joins by itself when it starts.");
+    item("The small x next to an app takes it out of the channel. Clear all empties the channel.");
+    item("Apps you never put in a channel play normally, as if the mixer wasn't there.");
+    item("Spare output (top row): apps in a channel have their own sound moved to this device, so you hear them "
+         "only once, through the mixer. Pick a device you don't listen to, e.g. monitor/HDMI audio. "
+         "\"Off\" leaves apps alone (you may hear them twice). \"Reset all app outputs\" puts every app back to normal.");
+
+    ImGui::SeparatorText("Mic channel");
+    item("Choose your microphone in the list at the top of the channel.");
+    item("It starts muted, so you don't hear yourself. The bar still moves when you talk, so you can see it works.");
+    item("Unmute (M) to hear yourself, e.g. to check how you sound. Use headphones, or the speakers echo.");
+
+    ImGui::SeparatorText("Every channel");
+    item("Name: click it to rename. The x in the corner removes the channel.");
+    item("Output: where this channel plays. \"Automatic (Master)\" follows the Master output. "
+         "Pick a device to send just this channel there, e.g. chat to a headset and music to speakers. "
+         "Your pick stays, even if the device is unplugged for a while.");
+    item("Volume: 0-100%. The meter beside it is green when normal, yellow when loud, and red at the limit. "
+         "The thin line shows the latest peak.");
+    item("Balance: left or right; it snaps to the center.");
+    item("M mutes the channel. S (solo) plays only the soloed channels.");
+
+    ImGui::SeparatorText("Equalizer");
+    item("10 sliders from deep bass (31 Hz, left) to treble (16k, right). Up is louder, down is quieter, the middle is unchanged.");
+    item("The curve above the sliders shows the overall shape.");
+    item("Pick a preset from the list. A * means you changed it. Save stores your own; pick Flat to undo every change.");
+    item("Delete removes the chosen preset, built-in ones too (except Flat). Channels using it keep their sound. "
+         "\"Restore built-in presets\" in the Presets window brings deleted built-ins back.");
+    ImGui::End();
 }
 
 void MixerUI::drawPresetRow(Strip& strip)
 {
     const std::string label = strip.preset + (strip.presetModified ? " *" : "");
-    ImGui::SetNextItemWidth(-60.0f);
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float saveW = ImGui::CalcTextSize("Save").x + style.FramePadding.x * 2.0f;
+    const float delW = ImGui::CalcTextSize("Delete").x + style.FramePadding.x * 2.0f;
+    ImGui::SetNextItemWidth(-(saveW + delW + style.ItemSpacing.x * 2.0f));
     if (ImGui::BeginCombo("##preset", label.c_str())) {
         for (const Preset& p : presets_.presets()) {
             if (ImGui::Selectable(p.name.c_str(), p.name == strip.preset && !strip.presetModified)) {
@@ -697,11 +975,30 @@ void MixerUI::drawPresetRow(Strip& strip)
         ImGui::EndCombo();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Save", ImVec2(-1.0f, 0))) {
+    if (ImGui::Button("Save", ImVec2(saveW, 0))) {
         const Preset* current = presets_.find(strip.preset);
         copyToBuf(strip.presetNameBuf, current && !current->builtIn ? strip.preset : std::string());
         presetError_.clear();
         ImGui::OpenPopup("savepreset");
+    }
+    ImGui::SameLine();
+    const bool deletable = presets_.canRemove(strip.preset);
+    ImGui::BeginDisabled(!deletable);
+    if (ImGui::Button("Delete", ImVec2(delW, 0))) ImGui::OpenPopup("deletepreset");
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip(deletable ? "Delete this preset" : strip.preset == "Flat" ? "Flat can't be deleted" : "Pick a preset to delete it");
+    }
+    if (ImGui::BeginPopup("deletepreset")) {
+        ImGui::Text("Delete the preset \"%s\"?", strip.preset.c_str());
+        ImGui::TextDisabled("Channels using it keep their current sound.");
+        if (ImGui::Button("Delete")) {
+            deletePreset(strip.preset);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
     }
     if (ImGui::BeginPopup("savepreset")) {
         ImGui::TextUnformatted("Save this EQ as a preset:");
@@ -718,7 +1015,7 @@ void MixerUI::drawPresetRow(Strip& strip)
             }
         }
         if (!presetError_.empty()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", presetError_.c_str());
+            ImGui::TextColored(themeColors().errorText, "%s", presetError_.c_str());
         }
         ImGui::EndPopup();
     }
@@ -734,18 +1031,14 @@ void MixerUI::drawEq(Strip& strip)
         if (b > 0) ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::PushID(b);
-        if (ImGui::VSliderFloat("##band", ImVec2(kBandWidth, kSliderHeight), &gains[b], kEqMinGainDb, kEqMaxGainDb, "")) {
+        if (ImGui::VSliderFloat("##band", ImVec2(kBandWidth, kSliderHeight), &gains[b], kEqMinGainDb, kEqMaxGainDb, "", ImGuiSliderFlags_NoInput)) {
             ch.setGain(b, gains[b]);
             strip.presetModified = true;
             strip.curveDirty = true;
         }
-        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            ch.setGain(b, 0.0f);
-            strip.presetModified = true;
-            strip.curveDirty = true;
-        }
         if (ImGui::IsItemActive() || ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s Hz: %+.1f dB", kEqBandLabels[b], gains[b]);
+            ImGui::SetTooltip("%s Hz: %+.1f dB  (%s)", kEqBandLabels[b], gains[b],
+                              gains[b] > 0.05f ? "louder" : gains[b] < -0.05f ? "quieter" : "unchanged");
         }
         const float textW = ImGui::CalcTextSize(kEqBandLabels[b]).x;
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (kBandWidth - textW) * 0.5f); // may hang over a little, like real EQ labels
@@ -755,6 +1048,20 @@ void MixerUI::drawEq(Strip& strip)
     }
     ImGui::PopStyleVar();
     ImGui::EndGroup();
+}
+
+void MixerUI::deletePreset(const std::string& name)
+{
+    if (!presets_.remove(name, &presetError_)) return;
+    for (Strip& s : strips_) {
+        if (s.preset == name) { // keep the sound, just drop the link
+            s.preset = "Custom";
+            s.presetModified = false;
+        }
+    }
+    if (selectedPreset_ == name) selectedPreset_ = "Flat";
+    presetError_.clear();
+    savePresets();
 }
 
 void MixerUI::drawPresetManager()
@@ -791,7 +1098,11 @@ void MixerUI::drawPresetManager()
         ImGui::PopTextWrapPos();
 
         if (sel->builtIn) {
-            ImGui::TextDisabled("Built-in presets cannot be renamed or deleted.");
+            ImGui::TextDisabled(presets_.canRemove(sel->name) ? "Built-in presets can't be renamed, but can be deleted."
+                                                              : "Flat can't be deleted: it is the way back to the original sound.");
+            if (presets_.canRemove(sel->name)) {
+                if (ImGui::Button("Delete")) deletePreset(selectedPreset_);
+            }
         } else {
             ImGui::SetNextItemWidth(200.0f);
             ImGui::InputText("##rename", renameBuf_.data(), renameBuf_.size());
@@ -808,23 +1119,18 @@ void MixerUI::drawPresetManager()
                 }
             }
             ImGui::SameLine();
-            if (ImGui::Button("Delete")) {
-                const std::string name = selectedPreset_;
-                if (presets_.remove(name, &presetError_)) {
-                    for (Strip& s : strips_) {
-                        if (s.preset == name) { // keep the sound, just drop the link
-                            s.preset = "Custom";
-                            s.presetModified = false;
-                        }
-                    }
-                    selectedPreset_ = "Flat";
-                    savePresets();
-                }
-            }
+            if (ImGui::Button("Delete")) deletePreset(selectedPreset_);
+        }
+    }
+    if (presets_.hasHiddenBuiltIns()) {
+        ImGui::Separator();
+        if (ImGui::Button("Restore built-in presets")) {
+            presets_.restoreBuiltIns();
+            savePresets();
         }
     }
     if (!presetError_.empty()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", presetError_.c_str());
+        ImGui::TextColored(themeColors().errorText, "%s", presetError_.c_str());
     }
     ImGui::End();
 }

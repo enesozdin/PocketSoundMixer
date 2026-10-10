@@ -34,7 +34,7 @@ target_include_directories(psm_core PUBLIC src/core third_party/miniaudio)
 target_link_libraries(psm_core PUBLIC nlohmann_json::nlohmann_json)
 # Strip miniaudio features we never use: smaller binary, faster compile.
 target_compile_definitions(psm_core PUBLIC
-    MA_NO_ENCODING MA_NO_GENERATION MA_NO_ENGINE MA_NO_NODE_GRAPH)
+    MA_NO_DECODING MA_NO_ENCODING MA_NO_RESOURCE_MANAGER MA_NO_GENERATION MA_NO_ENGINE MA_NO_NODE_GRAPH)
 if(WIN32)
     # WASAPI per-app capture: COM, MMCSS thread priority, ActivateAudioInterfaceAsync.
     target_link_libraries(psm_core PUBLIC ole32 avrt mmdevapi shell32 runtimeobject)
@@ -83,7 +83,8 @@ if(PSM_BUILD_APP)
     add_executable(PocketSoundMixer
         src/app/main.cpp
         src/app/MixerUI.cpp
-        src/app/Session.cpp)
+        src/app/Session.cpp
+        src/app/Theme.cpp)
     target_link_libraries(PocketSoundMixer PRIVATE psm_core imgui)
     if(WIN32)
         # GUI app without a console window, but keep the standard main() entry point.
@@ -97,7 +98,8 @@ endif()
 # ---- Tests ----
 if(PSM_BUILD_TESTS)
     enable_testing()
-    add_executable(psm_core_tests tests/core_tests.cpp)
+    add_executable(psm_core_tests tests/core_tests.cpp src/app/Session.cpp)
+    target_include_directories(psm_core_tests PRIVATE src/app)
     target_link_libraries(psm_core_tests PRIVATE psm_core)
     add_test(NAME core COMMAND psm_core_tests)
 endif()
