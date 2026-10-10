@@ -74,3 +74,7 @@ The mixer also moves the app's own output to a spare device you don't listen to,
 1. Our own virtual audio driver, so every channel shows up as a Windows output device (like Sonar or Wave Link) and no spare device is needed.
 2. Per-app capture on macOS (Core Audio process taps, 14.2+) and Linux (PipeWire virtual sinks).
 3. Channel reordering.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
