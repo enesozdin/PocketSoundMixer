@@ -33,7 +33,7 @@ struct SessionConfig {
     float masterVolume = 1.0f;
     std::string outputDevice;    // where the mixer plays; empty = system default
     std::string theme = "Dark";  // "Dark" | "Midnight" | "Light"
-    std::string language = "en"; // UI language code; only "en" for now
+    std::string language = "en"; // UI language code: "en" or "tr"
     bool appAutoRoute = true;    // park captured apps' own output so they are heard once
     std::string appSilentOutput; // device name to park them on; empty = pick automatically
     std::vector<ChannelConfig> channels;

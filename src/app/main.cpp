@@ -3,6 +3,7 @@
 #include "Paths.h"
 #include "Presets.h"
 #include "Session.h"
+#include "TurkishGlyphs.h"
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -94,6 +95,14 @@ int main()
     ImFontConfig fontCfg;
     fontCfg.SizePixels = 14.0f * scale;
     io.Fonts->AddFontDefault(&fontCfg);
+    // The default font has no Ğ ğ İ ı Ş ş; merge just those six glyphs in for the Turkish UI.
+    static const ImWchar kTurkishRanges[] = {0x011E, 0x011F, 0x0130, 0x0131, 0x015E, 0x015F, 0};
+    ImFontConfig trCfg;
+    trCfg.MergeMode = true;
+    trCfg.FontDataOwnedByAtlas = false; // static data, the atlas must not free it
+    trCfg.PixelSnapH = true;
+    io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(psm::kTurkishGlyphsTtf), sizeof(psm::kTurkishGlyphsTtf),
+                                   13.0f * scale, &trCfg, kTurkishRanges);
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glslVersion);

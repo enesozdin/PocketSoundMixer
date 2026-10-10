@@ -1,6 +1,7 @@
 // Core tests: no audio device needed, runs in CI on every platform.
 #include "AudioEngine.h"
 #include "GraphicEq.h"
+#include "Lang.h"
 #include "Mixer.h"
 #include "Presets.h"
 #include "Session.h"
@@ -8,6 +9,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -420,6 +422,42 @@ void testRingBuffer()
     CHECK(empty.available() == 8);
 }
 
+// Every translation exists and uses the same printf specifiers as English, so a format string can
+// never read the wrong argument type when the language changes.
+void testTranslations()
+{
+    const auto specifiers = [](const char* text) {
+        std::string out;
+        for (const char* c = text; *c; ++c) {
+            if (*c != '%') continue;
+            const char* start = c++;
+            while (*c && std::strchr("+-#0 .123456789", *c)) ++c;
+            if (!*c) break;
+            if (*c == '%' && c == start + 1) continue; // "%%" is a literal percent sign
+            out.append(start, c + 1);
+        }
+        return out;
+    };
+    for (int i = 0; i < static_cast<int>(psm::S::Count); ++i) {
+        const auto id = static_cast<psm::S>(i);
+        psm::setLanguage(psm::Language::English);
+        const std::string en = psm::tr(id);
+        psm::setLanguage(psm::Language::Turkish);
+        const std::string trText = psm::tr(id);
+        CHECK(!en.empty() && !trText.empty());
+        // Help items are printed with "%s", so their percent signs are plain text.
+        const bool help = i >= static_cast<int>(psm::S::HelpMasterHead);
+        if (!help && specifiers(en.c_str()) != specifiers(trText.c_str())) {
+            std::printf("format mismatch in string %d: \"%s\" vs \"%s\"\n", i, en.c_str(), trText.c_str());
+            ++g_failures;
+        }
+    }
+    psm::setLanguage(psm::Language::English);
+    CHECK(psm::languageFromCode("tr") == psm::Language::Turkish);
+    CHECK(psm::languageFromCode("xx") == psm::Language::English);
+    CHECK(std::string(psm::languageCode(psm::Language::Turkish)) == "tr");
+}
+
 } // namespace
 
 int main()
@@ -437,6 +475,7 @@ int main()
     testChannelOnExtraOutput();
     testSessionRoundTripAndOldFormat();
     testEngineStartsWithMissingOutputDevice();
+    testTranslations();
     if (g_failures == 0) {
         std::printf("All core tests passed\n");
         return 0;

@@ -6,7 +6,7 @@
 
 namespace psm {
 
-enum class Theme { Dark, Midnight, Light };
+enum class Theme { Dark, Midnight, Light, Graphite, Violet }; // saved by name, so order is free
 
 // Colors the UI draws itself (meters, warnings) that Dear ImGui's style does not cover.
 struct ThemeColors {
@@ -24,7 +24,7 @@ struct ThemeColors {
 void applyTheme(Theme theme, float uiScale);
 const ThemeColors& themeColors();
 
-const char* themeName(Theme theme);
+const char* themeName(Theme theme); // English key saved in the session; see themeLabel() in the UI
 Theme themeFromName(const std::string& name); // unknown names give Dark
 
 } // namespace psm

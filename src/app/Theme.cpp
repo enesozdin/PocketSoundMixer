@@ -69,6 +69,56 @@ void applyTheme(Theme theme, float uiScale)
                     rgb(196, 70, 60), rgb(206, 160, 40)};
         break;
     }
+    case Theme::Graphite: {
+        // Black and gray only: no colored accent anywhere except the meters.
+        ImGui::StyleColorsDark(&s);
+        ImVec4* c = s.Colors;
+        c[ImGuiCol_WindowBg] = rgb(10, 10, 10);
+        c[ImGuiCol_ChildBg] = rgb(18, 18, 18);
+        c[ImGuiCol_PopupBg] = rgb(22, 22, 22, 0.98f);
+        c[ImGuiCol_Border] = rgb(52, 52, 52);
+        c[ImGuiCol_FrameBg] = rgb(36, 36, 36);
+        c[ImGuiCol_FrameBgHovered] = rgb(50, 50, 50);
+        c[ImGuiCol_FrameBgActive] = rgb(62, 62, 62);
+        c[ImGuiCol_TitleBg] = rgb(18, 18, 18);
+        c[ImGuiCol_Separator] = rgb(52, 52, 52);
+        c[ImGuiCol_Text] = rgb(228, 228, 228);
+        c[ImGuiCol_TextDisabled] = rgb(132, 132, 132);
+        setAccent(s, rgb(150, 150, 150));
+        c[ImGuiCol_CheckMark] = rgb(235, 235, 235);
+        c[ImGuiCol_SliderGrab] = rgb(176, 176, 176);
+        c[ImGuiCol_SliderGrabActive] = rgb(220, 220, 220);
+        c[ImGuiCol_PlotLines] = rgb(200, 200, 200);
+        g_colors = {IM_COL32(28, 28, 28, 255), IM_COL32(80, 200, 120, 255), IM_COL32(230, 200, 60, 255),
+                    IM_COL32(230, 70, 60, 255), rgb(255, 115, 102), rgb(255, 191, 77),
+                    rgb(180, 64, 54), rgb(190, 156, 30)};
+        break;
+    }
+    case Theme::Violet: {
+        // Near-black with a dark violet accent.
+        ImGui::StyleColorsDark(&s);
+        ImVec4* c = s.Colors;
+        c[ImGuiCol_WindowBg] = rgb(11, 9, 15);
+        c[ImGuiCol_ChildBg] = rgb(17, 14, 23);
+        c[ImGuiCol_PopupBg] = rgb(21, 17, 29, 0.98f);
+        c[ImGuiCol_Border] = rgb(52, 42, 70);
+        c[ImGuiCol_FrameBg] = rgb(33, 27, 45);
+        c[ImGuiCol_FrameBgHovered] = rgb(46, 37, 64);
+        c[ImGuiCol_FrameBgActive] = rgb(58, 46, 82);
+        c[ImGuiCol_TitleBg] = rgb(17, 14, 23);
+        c[ImGuiCol_Separator] = rgb(52, 42, 70);
+        c[ImGuiCol_Text] = rgb(230, 226, 238);
+        c[ImGuiCol_TextDisabled] = rgb(136, 126, 156);
+        setAccent(s, rgb(112, 64, 186));
+        c[ImGuiCol_SliderGrab] = rgb(140, 92, 214);
+        c[ImGuiCol_SliderGrabActive] = rgb(170, 128, 236);
+        c[ImGuiCol_CheckMark] = rgb(186, 150, 245);
+        c[ImGuiCol_PlotLines] = rgb(170, 128, 236);
+        g_colors = {IM_COL32(26, 21, 34, 255), IM_COL32(80, 200, 120, 255), IM_COL32(235, 196, 70, 255),
+                    IM_COL32(236, 76, 70, 255), rgb(255, 120, 110), rgb(255, 196, 90),
+                    rgb(190, 66, 60), rgb(200, 158, 36)};
+        break;
+    }
     case Theme::Light: {
         ImGui::StyleColorsLight(&s);
         ImVec4* c = s.Colors;
@@ -98,6 +148,8 @@ const char* themeName(Theme theme)
     switch (theme) {
     case Theme::Midnight: return "Midnight";
     case Theme::Light: return "Light";
+    case Theme::Graphite: return "Graphite";
+    case Theme::Violet: return "Violet";
     case Theme::Dark: break;
     }
     return "Dark";
@@ -107,6 +159,8 @@ Theme themeFromName(const std::string& name)
 {
     if (name == "Midnight") return Theme::Midnight;
     if (name == "Light") return Theme::Light;
+    if (name == "Graphite") return Theme::Graphite;
+    if (name == "Violet") return Theme::Violet;
     return Theme::Dark;
 }
 
