@@ -12,7 +12,7 @@ A lightweight desktop sound mixer for Windows, macOS and Linux. You can add or r
 - **Per-channel output**: each channel plays on the Master output ("Automatic") or on a device you pick, e.g. chat on a headset and music on the speakers. Up to 3 extra devices.
 - **Settings**: theme (Dark, Midnight, Graphite, Violet, Light) and language (English or Turkish).
 - Volume in percent (0-100 %), balance, mute, solo and peak meters on each channel. Meters use the broadcast (IEC 60268-18) scale with a peak-hold line, and keep moving on a muted channel.
-- A **Help** window in the app, and a [user guide](docs/USER_GUIDE.md).
+- A **Help** window in the app, and a user guide in [English](docs/USER_GUIDE.md) and [Türkçe](docs/USER_GUIDE.tr.md); Help opens the one for the chosen language.
 - The channel layout is saved on exit and restored on the next launch.
 
 Settings live in `%APPDATA%\PocketSoundMixer` on Windows, `~/Library/Application Support/PocketSoundMixer` on macOS, and `~/.config/PocketSoundMixer` on Linux.

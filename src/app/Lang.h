@@ -115,6 +115,10 @@ enum class Language : std::uint8_t { English, Turkish, Count };
     X(Quieter, "quieter", "daha alçak") \
     X(Unchanged, "unchanged", "değişmez") \
     /* Help */ \
+    X(OpenGuide, "Open the full user guide", "Kullanım kılavuzunu aç") \
+    X(OpenGuideTip, "Opens the user guide in your browser, in this language", "Kullanım kılavuzunu tarayıcında, bu dilde açar") \
+    X(GuideUrl, "https://github.com/enesozdin/PocketSoundMixer/blob/main/docs/USER_GUIDE.md", \
+      "https://github.com/enesozdin/PocketSoundMixer/blob/main/docs/USER_GUIDE.tr.md") \
     X(HelpMasterHead, "Master (top row)", "Ana (üst satır)") \
     X(HelpMasterOutput, "Master output: where you listen. \"System default\" follows Windows; or pick your headphones or speakers.", \
       "Ana çıkış: dinlediğin yer. \"Sistem varsayılanı\" Windows'u izler; ya da kulaklığını veya hoparlörünü seç.") \

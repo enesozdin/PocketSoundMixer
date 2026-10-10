@@ -1,5 +1,7 @@
 # PocketSoundMixer user guide
 
+*Türkçe: [Kullanım kılavuzu](USER_GUIDE.tr.md)*
+
 PocketSoundMixer lets you set the volume and sound of each kind of audio on your PC separately. You might put music in one channel, your game in another and voice chat in a third, and give each its own volume and equalizer.
 
 Per-app channels need Windows 11, or Windows 10 build 20348 or newer. On macOS and Linux only the Mic channel works for now.
@@ -10,7 +12,9 @@ The mixer opens with six channels: **Music**, **Game**, **Film**, **Chat**, **Po
 
 The Mic channel holds your default microphone and starts muted, so you don't hear yourself through the speakers. Its meter still moves when you talk, so you can see the mic works.
 
-To get back to these six channels at any time, click **Reset channels** and confirm. Your apps go back to normal, and the Master output, volume and theme stay as they are.
+To get back to these six channels at any time, click **Reset channels** and confirm. Your apps go back to normal, and the Master output, volume, theme and language stay as they are.
+
+You can resize the window freely. It stops at a minimum size that still shows the button row and one full channel; when the window is narrow, the top row wraps onto more lines.
 
 ## The buttons under the Master row
 
@@ -20,7 +24,7 @@ To get back to these six channels at any time, click **Reset channels** and conf
 | **+ Add mic channel** | Adds a channel for a microphone (muted at first). |
 | **Reset channels** | Replaces all channels with the six default ones. |
 | **Settings** (right) | **Theme**: Dark, Midnight (near-black with teal), Graphite (black and gray), Violet (black with dark violet) or Light. **Language**: English (default) or Türkçe; the whole mixer switches at once. Your choices are remembered. |
-| **Help** (far right) | Opens a short guide on the right side of the window. Click it again or the x to close it. |
+| **Help** (far right) | Opens a short guide on the right side of the window, in the language you chose. **Open the full user guide** at its top opens this guide in your browser, in that language too. Click Help again or the x to close it. |
 
 ## The Master row (top)
 
@@ -112,7 +116,7 @@ Some quick recipes:
 
 ## Where settings are saved
 
-The channels, their apps, volumes and the Master output are saved when you close the mixer, and come back on the next launch.
+The channels, their apps, volumes, the Master output, the theme and the language are saved when you close the mixer, and come back on the next launch. Presets are saved as soon as you save or delete one.
 
 | System | Folder |
 |---|---|

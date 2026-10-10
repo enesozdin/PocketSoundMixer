@@ -1,6 +1,7 @@
 #include "MixerUI.h"
 
 #include "Lang.h"
+#include "OpenUrl.h"
 
 #include "imgui.h"
 
@@ -989,6 +990,9 @@ void MixerUI::drawHelp()
         ImGui::Bullet();
         ImGui::TextWrapped("%s", tr(text));
     };
+    if (ImGui::Button(tr(S::OpenGuide))) openUrl(tr(S::GuideUrl));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tr(S::OpenGuideTip));
+
     ImGui::SeparatorText(tr(S::HelpMasterHead));
     item(S::HelpMasterOutput);
     item(S::HelpMasterVolume);

@@ -84,6 +84,7 @@ if(PSM_BUILD_APP)
         src/app/main.cpp
         src/app/Lang.cpp
         src/app/MixerUI.cpp
+        src/app/OpenUrl.cpp
         src/app/Session.cpp
         src/app/Theme.cpp)
     target_link_libraries(PocketSoundMixer PRIVATE psm_core imgui)
