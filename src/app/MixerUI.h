@@ -4,6 +4,7 @@
 #include "AudioEngine.h"
 #include "Presets.h"
 #include "Session.h"
+#include "Theme.h"
 
 #include <array>
 #include <filesystem>
@@ -28,6 +29,7 @@ public:
     bool isAnimating() const { return animating_; }
 
     void setStatus(std::string text) { status_ = std::move(text); }
+    void setUiScale(float scale) { uiScale_ = scale; }
 
 private:
     static constexpr int kCurvePoints = 64;
@@ -41,6 +43,7 @@ private:
 
     struct Strip {
         Channel* channel = nullptr;
+        bool isMic = false; // mic channel: one microphone instead of apps
         std::string preset = "Flat";
         bool presetModified = false;
         std::array<char, 64> nameBuf{};
@@ -52,7 +55,7 @@ private:
         std::string error;
     };
 
-    Strip* addStrip(const std::string& name);
+    Strip* addStrip(const std::string& name, bool isMic);
     void removeStrip(size_t index);
     void addInput(Strip& strip, const std::string& deviceName);
     void addApp(Strip& strip, const std::string& exeName);
@@ -70,7 +73,10 @@ private:
     void drawToolBar();
     void drawStrip(Strip& strip, size_t index, float dt);
     void drawEq(Strip& strip);
-    void drawSources(Strip& strip);
+    void drawAppSources(Strip& strip);
+    void drawMicSource(Strip& strip);
+    void setTheme(Theme theme);
+    void resetChannels();
     void drawPresetRow(Strip& strip);
     void drawPresetManager();
     void drawHelp();
@@ -91,6 +97,8 @@ private:
     Meter masterMeter_[2];
     bool showPresetManager_ = false;
     bool showHelp_ = false;
+    Theme theme_ = Theme::Dark;
+    float uiScale_ = 1.0f;
     std::string selectedPreset_ = "Flat";
     std::array<char, 64> renameBuf_{};
     std::string presetError_;

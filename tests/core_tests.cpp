@@ -291,35 +291,32 @@ void testSessionRoundTripAndOldFormat()
     std::string err;
     const psm::SessionConfig def = psm::defaultSession();
     CHECK(def.channels.size() == 6);
-    CHECK(def.channels.back().name == "Mic" && def.channels.back().mute);
+    CHECK(def.channels.back().name == "Mic" && def.channels.back().mute && def.channels.back().kind == "mic");
+    CHECK(def.channels.front().kind == "apps");
     CHECK(def.channels.back().sources.size() == 1 && def.channels.back().sources[0].type == "input");
 
     psm::SessionConfig s = def;
     s.outputDevice = "Headphones";
+    s.theme = "Light";
     s.channels[0].sources = {{"app", "Spotify.exe", {}}, {"app", "chrome.exe", {}}};
     const auto file = std::filesystem::temp_directory_path() / "psm_test_session.json";
     CHECK(psm::saveSession(file, s, &err));
     psm::SessionConfig loaded;
     CHECK(psm::loadSession(file, loaded, &err));
     CHECK(loaded.outputDevice == "Headphones");
+    CHECK(loaded.theme == "Light");
+    CHECK(loaded.channels.back().kind == "mic" && loaded.channels.back().sources.size() == 1);
     CHECK(loaded.channels.size() == 6);
     CHECK(loaded.channels[0].sources.size() == 2 && loaded.channels[0].sources[1].appExe == "chrome.exe");
 
-    // Version 1 files had one source per channel, file playback and volume up to 2.
+    // Layouts saved by earlier test builds (before version 3) are dropped: the app starts with the six defaults.
     {
         std::ofstream out(file, std::ios::trunc);
-        out << R"({"version":1,"master":1.5,"channels":[
-            {"name":"Music","source":"app","app":"Spotify.exe","volume":1.8},
-            {"name":"Old","source":"file","file":"song.mp3"},
-            {"name":"Mic","source":"input","input":""}]})";
+        out << R"({"version":2,"master":0.5,"channels":[{"name":"A"},{"name":"B"},{"name":"C"},{"name":"D"},
+            {"name":"E"},{"name":"F"},{"name":"G"},{"name":"H"},{"name":"I"}]})";
     }
-    CHECK(psm::loadSession(file, loaded, &err));
-    CHECK(loaded.masterVolume == 1.0f);
-    CHECK(loaded.channels.size() == 3);
-    CHECK(loaded.channels[0].sources.size() == 1 && loaded.channels[0].sources[0].appExe == "Spotify.exe");
-    CHECK(loaded.channels[0].volume == 1.0f);
-    CHECK(loaded.channels[1].sources.empty()); // file playback was removed
-    CHECK(loaded.channels[2].sources.size() == 1 && loaded.channels[2].sources[0].type == "input");
+    psm::SessionConfig old;
+    CHECK(!psm::loadSession(file, old, &err));
     std::filesystem::remove(file);
 }
 

@@ -2,13 +2,26 @@
 
 PocketSoundMixer lets you set the volume and sound of each kind of audio on your PC separately. You might put music in one channel, your game in another and voice chat in a third, and give each its own volume and equalizer.
 
-Per-app channels need Windows 11, or Windows 10 build 20348 or newer. On macOS and Linux you can use channels for microphones and other inputs for now.
+Per-app channels need Windows 11, or Windows 10 build 20348 or newer. On macOS and Linux only the Mic channel works for now.
 
 ## First launch
 
 The mixer opens with six channels: **Music**, **Game**, **Film**, **Chat**, **Podcast** and **Mic**. Each channel already has a matching equalizer preset. The channels start empty, so all your apps keep playing exactly as before until you add them to a channel.
 
 The Mic channel holds your default microphone and starts muted, so you don't hear yourself through the speakers. Its meter still moves when you talk, so you can see the mic works.
+
+To get back to these six channels at any time, click **Reset channels** and confirm. Your apps go back to normal, and the Master output, volume and theme stay as they are.
+
+## The buttons under the Master row
+
+| Button | What it does |
+|---|---|
+| **+ Add channel** | Adds a channel for apps. |
+| **+ Add mic channel** | Adds a channel for a microphone (muted at first). |
+| **Presets** | Opens the window where you rename or delete your own equalizer presets. |
+| Theme list | **Dark**, **Midnight** (a darker, neutral dark theme) or **Light**. The choice is remembered. |
+| **Reset channels** | Replaces all channels with the six default ones. |
+| **Help** | Opens a short guide on the right side of the window. Click it again or the x to close it. |
 
 ## The Master row (top)
 
@@ -28,7 +41,7 @@ If the saved device is unplugged, the mixer plays on the system default instead.
 
 Some things to know about apps in channels:
 
-- One channel can hold up to 8 apps and mics. Their sound is mixed together, then goes through the channel's equalizer and volume.
+- One channel can hold up to 8 apps. Their sound is mixed together, then goes through the channel's equalizer and volume.
 - An app can be in only one channel. If you pick an app that is already in another channel, it moves to this one. The list shows where each app is.
 - If the app isn't in the list because it isn't playing yet, type its program name (for example `Spotify.exe`) and click **Add**.
 - If the app is closed, the channel says *waiting for it to start*. It connects by itself when the app starts.
@@ -43,9 +56,13 @@ The mixer has to capture the app's sound. If the app also kept playing on your s
 - If your PC has only one output device, there is nowhere to move the app, so you will hear it twice. Connect a second output (a monitor with speakers, or a USB headset), or install the free VB-Cable driver.
 - If an app ever stays silent after the mixer crashed, open the + App popup and click **Reset all app outputs**.
 
-## Microphones
+## The Mic channel
 
-Click **+ Mic** on any channel and pick **Default microphone** or a specific device. Unmute the channel (the **M** button) to hear yourself, for example to check how you sound. Use headphones when you do this, or the speakers will feed back into the mic.
+Microphones have their own channel, so app channels only hold apps. At the top of the Mic channel, pick **Default microphone**, a specific device, or **None**.
+
+The Mic channel starts muted. Its meter still moves, greyed out, when you talk. Unmute it (the **M** button) to hear yourself, for example to check how you sound with an equalizer preset. Use headphones when you do this, or the speakers will feed back into the mic.
+
+Need a second mic? Click **+ Add mic channel**.
 
 ## Channel controls
 
@@ -55,7 +72,7 @@ Click **+ Mic** on any channel and pick **Default microphone** or a specific dev
 | **x** (top right) | Removes the channel. |
 | Volume fader | 0 % to 100 %. It changes loudness in steps your ear hears as even: 50 % is clearly quieter, and 10 % is barely audible. |
 | Meter | Green is normal, yellow is loud, and red means the sound is at the limit, so turn something down. The thin line shows the latest peak for a moment. On a muted channel the meter is greyed out but still moves. |
-| Balance | Moves the sound to the left or right. Double-click it to center it. |
+| Balance | Moves the sound to the left or right. It snaps to the center when you drag close to it. |
 | **M** | Mute. |
 | **S** | Solo. When any channel is soloed, only soloed channels play. |
 
@@ -65,7 +82,7 @@ The 10 sliders change different pitches, from deep bass on the left (31 Hz) to t
 
 - Up makes that range louder, down makes it quieter, and the middle leaves it unchanged. Hover a slider to see its exact value.
 - The small curve above the sliders shows the overall shape.
-- Double-click a slider to put it back in the middle.
+- To undo all your changes, pick the **Flat** preset.
 
 Some quick recipes:
 

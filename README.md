@@ -5,10 +5,11 @@ A lightweight desktop sound mixer for Windows, macOS and Linux. You can add or r
 ## Features
 
 - **Master on top**: pick the speakers or headphones the mixer plays on ("System default" follows Windows), with a master volume and meter.
-- **Dynamic channels**: add or remove up to 64. The first launch starts with Music, Game, Film, Chat, Podcast and a muted Mic channel.
-- **10-band graphic EQ per channel** at 31 Hz to 16 kHz, ±12 dB. Double-click a slider to reset it.
+- **Dynamic channels**: add or remove up to 64. The first launch starts with Music, Game, Film, Chat, Podcast and a muted Mic channel; **Reset channels** brings these back.
+- **10-band graphic EQ per channel** at 31 Hz to 16 kHz, ±12 dB.
 - **Presets**: 10 built-in ones (Flat, Bass Boost, Treble Boost, Vocal, Loudness, Music, Game, Film, Chat, Podcast) plus as many of your own as you want. Use **Save** on a channel to create one and the **Presets** window to rename or delete.
-- **Several apps per channel** on Windows (for example Spotify and YouTube in Chrome both in Music), plus microphones and other inputs. Up to 8 sources per channel.
+- **Several apps per channel** on Windows (for example Spotify and YouTube in Chrome both in Music), up to 8. Microphones have their own Mic channel.
+- **Themes**: Dark, Midnight and Light.
 - Volume in percent (0-100 %), balance, mute, solo and peak meters on each channel. Meters use the broadcast (IEC 60268-18) scale with a peak-hold line, and keep moving on a muted channel.
 - A **Help** window in the app, and a [user guide](docs/USER_GUIDE.md).
 - The channel layout is saved on exit and restored on the next launch.
@@ -53,7 +54,7 @@ UI thread (Dear ImGui)                      Audio thread (miniaudio callback)
 
 ## Per-app channels (Windows)
 
-Click **+ App** on a channel and pick one or more apps that is playing sound, or type its exe name (for example `Spotify.exe`). The channel captures that app and its child processes through WASAPI process loopback. This needs Windows 11 or Windows 10 build 20348+, and no driver. If the app isn't running yet, the channel waits and connects when it starts. Picking an app that is already in another channel moves it. The choice is saved with the session.
+Click **+ App** on a channel and pick one or more apps that are playing sound, or type its exe name (for example `Spotify.exe`). The channel captures that app and its child processes through WASAPI process loopback. This needs Windows 11 or Windows 10 build 20348+, and no driver. If the app isn't running yet, the channel waits and connects when it starts. Picking an app that is already in another channel moves it. The choice is saved with the session.
 
 With **Hear apps only through the mixer** on (the default), the mixer also moves the app's own output to a spare device you don't listen to, such as monitor/HDMI audio or the speakers while you use a headset. That way you hear the app only once, through its channel. It does this through the same Windows setting as "App volume and device preferences", and puts the app back when you remove it from the channel or close the mixer. The spare device is never the one picked as the Master output. If there is no spare device, the app plays directly as well. **Reset all app outputs** in the App popup puts every app back on the normal output.
 

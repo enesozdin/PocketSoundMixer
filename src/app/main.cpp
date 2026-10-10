@@ -72,14 +72,11 @@ int main()
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr; // layout is fixed; nothing to persist
-    ImGui::StyleColorsDark();
-
     float scale = 1.0f;
     glfwGetWindowContentScale(window, &scale, nullptr);
 #if defined(__APPLE__)
     scale = 1.0f; // macOS scales the framebuffer itself
 #endif
-    ImGui::GetStyle().ScaleAllSizes(scale);
     ImFontConfig fontCfg;
     fontCfg.SizePixels = 14.0f * scale;
     io.Fonts->AddFontDefault(&fontCfg);
@@ -88,6 +85,7 @@ int main()
     ImGui_ImplOpenGL3_Init(glslVersion);
 
     psm::MixerUI ui(engine, presets, presetFile);
+    ui.setUiScale(scale); // the theme scales the style; applySession applies the saved theme
     ui.applySession(session);
     if (!audioError.empty()) ui.setStatus(audioError);
     else if (!presetError.empty()) ui.setStatus(presetError);
@@ -119,7 +117,8 @@ int main()
         int h = 0;
         glfwGetFramebufferSize(window, &w, &h);
         glViewport(0, 0, w, h);
-        glClearColor(0.08f, 0.08f, 0.09f, 1.0f);
+        const ImVec4 bg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+        glClearColor(bg.x, bg.y, bg.z, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);

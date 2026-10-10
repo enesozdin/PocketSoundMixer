@@ -103,12 +103,12 @@ static bool updateMeter(float& db, float& holdDb, float& holdSeconds, float peak
 
 static void drawMeterBar(ImDrawList* dl, ImVec2 min, ImVec2 max, float db, float holdDb, bool vertical, bool dimmed)
 {
-    dl->AddRectFilled(min, max, IM_COL32(30, 30, 34, 255));
-    const int alpha = dimmed ? 110 : 255; // muted channel: still shows the signal, greyed out
-    const auto colorFor = [alpha](float d) {
-        return d > -1.0f  ? IM_COL32(230, 70, 60, alpha)    // at the limit
-             : d > -9.0f  ? IM_COL32(230, 200, 60, alpha)   // loud
-                          : IM_COL32(80, 200, 120, alpha);  // normal
+    const ThemeColors& tc = themeColors();
+    dl->AddRectFilled(min, max, tc.meterBack);
+    const ImU32 alpha = dimmed ? 110u : 255u; // muted channel: still shows the signal, greyed out
+    const auto colorFor = [&tc, alpha](float d) {
+        const ImU32 c = d > -1.0f ? tc.meterLimit : d > -9.0f ? tc.meterLoud : tc.meterNormal;
+        return (c & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);
     };
     const float t = meterDeflection(db);
     const float th = meterDeflection(holdDb);
@@ -148,9 +148,10 @@ void MixerUI::applySession(const SessionConfig& session)
     appAutoRoute_ = session.appAutoRoute;
     appSilentOutput_ = session.appSilentOutput;
     masterVolumePct_ = gainToPercent(session.masterVolume);
+    setTheme(themeFromName(session.theme));
 
     for (const ChannelConfig& c : session.channels) {
-        Strip* s = addStrip(c.name);
+        Strip* s = addStrip(c.name, c.kind == "mic");
         if (!s) break;
         Channel& ch = *s->channel;
         // A saved custom curve wins over the preset, which may have been edited or deleted since.
@@ -186,10 +187,12 @@ SessionConfig MixerUI::captureSession() const
     session.outputDevice = engine_.requestedOutput();
     session.appAutoRoute = appAutoRoute_;
     session.appSilentOutput = appSilentOutput_;
+    session.theme = themeName(theme_);
     for (const Strip& s : strips_) {
         const Channel& ch = *s.channel;
         ChannelConfig c;
         c.name = ch.name();
+        c.kind = s.isMic ? "mic" : "apps";
         c.preset = s.preset;
         c.gainsDb = ch.gains();
         c.volume = ch.volume.load();
@@ -214,7 +217,7 @@ SessionConfig MixerUI::captureSession() const
 // ---------------------------------------------------------------------------------------------
 // Actions
 
-MixerUI::Strip* MixerUI::addStrip(const std::string& name)
+MixerUI::Strip* MixerUI::addStrip(const std::string& name, bool isMic)
 {
     Channel* ch = engine_.mixer().addChannel(name);
     if (!ch) {
@@ -223,6 +226,7 @@ MixerUI::Strip* MixerUI::addStrip(const std::string& name)
     }
     Strip s;
     s.channel = ch;
+    s.isMic = isMic;
     copyToBuf(s.nameBuf, name);
     strips_.push_back(s);
     return &strips_.back();
@@ -236,10 +240,7 @@ void MixerUI::removeStrip(size_t index)
 
 void MixerUI::addInput(Strip& strip, const std::string& deviceName)
 {
-    if (strip.channel->freeSourceSlot() < 0) {
-        strip.error = "This channel is full (" + std::to_string(Channel::kMaxSources) + " sources)";
-        return;
-    }
+    engine_.mixer().clearSources(strip.channel); // a mic channel holds one microphone
     std::string err;
     std::unique_ptr<InputSource> src = engine_.openInput(deviceName, &err);
     if (!src) {
@@ -287,6 +288,29 @@ void MixerUI::addApp(Strip& strip, const std::string& exeName)
     }
     engine_.mixer().addSource(strip.channel, std::move(src));
     strip.error.clear();
+}
+
+void MixerUI::setTheme(Theme theme)
+{
+    theme_ = theme;
+    applyTheme(theme, uiScale_);
+}
+
+void MixerUI::resetChannels()
+{
+    // Back to the six default channels; the Master output, volume and theme stay as they are.
+    SessionConfig fresh = defaultSession();
+    const SessionConfig current = captureSession();
+    fresh.masterVolume = current.masterVolume;
+    fresh.outputDevice = current.outputDevice;
+    fresh.theme = current.theme;
+    fresh.appAutoRoute = current.appAutoRoute;
+    fresh.appSilentOutput = current.appSilentOutput;
+    while (!strips_.empty()) {
+        removeStrip(strips_.size() - 1);
+    }
+    engine_.mixer().flushGarbage(200); // removed apps get their own output back before anything new starts
+    applySession(fresh);
 }
 
 void MixerUI::removeSource(Strip& strip, int slot)
@@ -354,7 +378,7 @@ void MixerUI::drawAppRoutingSettings()
     const std::string current = silentOutputId();
     if (current.empty()) {
         ImGui::PushTextWrapPos(380.0f);
-        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+        ImGui::TextColored(themeColors().warningText,
                            "No spare output device, so captured apps also play directly. "
                            "Connect a second output (a monitor with audio, a USB headset) or install the free VB-Cable driver.");
         ImGui::PopTextWrapPos();
@@ -518,17 +542,48 @@ void MixerUI::drawMasterBar(float dt)
 void MixerUI::drawToolBar()
 {
     if (ImGui::Button("+ Add channel")) {
-        if (addStrip("Channel " + std::to_string(strips_.size() + 1))) {
+        if (addStrip("Channel " + std::to_string(strips_.size() + 1), false)) {
+            scrollToNewStrip_ = true;
+        }
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("A new channel for apps");
+    ImGui::SameLine();
+    if (ImGui::Button("+ Add mic channel")) {
+        if (Strip* s = addStrip("Mic", true)) {
+            s->channel->mute = true; // never surprise anyone with their own voice on the speakers
+            addInput(*s, "");
             scrollToNewStrip_ = true;
         }
     }
     ImGui::SameLine();
     if (ImGui::Button("Presets")) showPresetManager_ = !showPresetManager_;
     ImGui::SameLine();
+    ImGui::SetNextItemWidth(120.0f);
+    if (ImGui::BeginCombo("##theme", themeName(theme_))) {
+        for (Theme t : {Theme::Dark, Theme::Midnight, Theme::Light}) {
+            if (ImGui::Selectable(themeName(t), t == theme_)) setTheme(t);
+        }
+        ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Theme");
+    ImGui::SameLine();
+    if (ImGui::Button("Reset channels")) ImGui::OpenPopup("reset");
+    if (ImGui::BeginPopup("reset")) {
+        ImGui::TextUnformatted("Replace all channels with the six default ones?");
+        ImGui::TextDisabled("Music, Game, Film, Chat, Podcast and Mic. Your apps go back to normal.");
+        if (ImGui::Button("Reset")) {
+            resetChannels();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
     if (ImGui::Button("Help")) showHelp_ = !showHelp_;
     if (!status_.empty()) {
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s", status_.c_str());
+        ImGui::TextColored(themeColors().errorText, "%s", status_.c_str());
     }
 }
 
@@ -558,7 +613,8 @@ void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
         ImGui::EndPopup();
     }
 
-    drawSources(strip);
+    if (strip.isMic) drawMicSource(strip);
+    else drawAppSources(strip);
     drawPresetRow(strip);
     if (strip.curveDirty) {
         updateCurve(strip);
@@ -593,23 +649,21 @@ void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
     // Pan, mute, solo.
     float pan = ch.pan.load();
     ImGui::SetNextItemWidth(140.0f);
-    if (ImGui::SliderFloat("##pan", &pan, -1.0f, 1.0f, pan == 0.0f ? "Center" : (pan < 0 ? "Left %.2f" : "Right %.2f"))) {
-        ch.pan = pan;
-    }
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        ch.pan = 0.0f;
+    if (ImGui::SliderFloat("##pan", &pan, -1.0f, 1.0f, pan == 0.0f ? "Center" : (pan < 0 ? "Left %.2f" : "Right %.2f"),
+                           ImGuiSliderFlags_NoInput)) {
+        ch.pan = std::fabs(pan) < 0.05f ? 0.0f : pan; // snaps to center, so it is easy to hit
     }
     ImGui::SameLine();
-    if (toggleButton("M", muted, ImVec4(0.75f, 0.25f, 0.2f, 1.0f), ImVec2(32, 0))) ch.mute = !muted;
+    if (toggleButton("M", muted, themeColors().muteOn, ImVec2(32, 0))) ch.mute = !muted;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mute");
     ImGui::SameLine();
     const bool soloed = ch.solo.load();
-    if (toggleButton("S", soloed, ImVec4(0.8f, 0.65f, 0.1f, 1.0f), ImVec2(32, 0))) ch.solo = !soloed;
+    if (toggleButton("S", soloed, themeColors().soloOn, ImVec2(32, 0))) ch.solo = !soloed;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Solo: only soloed channels play");
 
     if (!strip.error.empty()) {
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", strip.error.c_str());
+        ImGui::TextColored(themeColors().errorText, "%s", strip.error.c_str());
         ImGui::PopTextWrapPos();
     }
 
@@ -617,17 +671,17 @@ void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
     ImGui::PopID();
 }
 
-void MixerUI::drawSources(Strip& strip)
+void MixerUI::drawAppSources(Strip& strip)
 {
     Channel& ch = *strip.channel;
 
-    // Fixed-height list so every strip's EQ lines up; more than three sources scroll.
+    // Fixed-height list so every strip's EQ lines up; more than three apps scroll.
     const float rowH = ImGui::GetFrameHeightWithSpacing();
     ImGui::BeginChild("sources", ImVec2(-1.0f, rowH * kSourceRows), ImGuiChildFlags_None);
     int shown = 0;
     for (int i = 0; i < Channel::kMaxSources; ++i) {
         AudioSource* src = ch.source(i);
-        if (!src) continue;
+        if (!src || src->kind() != SourceKind::App) continue;
         ++shown;
         ImGui::PushID(i);
         if (ImGui::SmallButton("x")) {
@@ -638,49 +692,42 @@ void MixerUI::drawSources(Strip& strip)
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove from this channel");
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
-        if (src->kind() == SourceKind::Input) {
-            ImGui::Text("Mic: %s", static_cast<InputSource*>(src)->deviceName().c_str());
-        } else if (src->kind() == SourceKind::App) {
-            const auto* app = static_cast<AppSource*>(src);
-            const std::string name = appDisplayName(app->exeName());
-            switch (app->state()) {
-            case AppSource::State::Capturing:
-                ImGui::Text("%s", name.c_str());
-                ImGui::SameLine();
-                ImGui::TextDisabled(app->isRerouted() ? "(only via mixer)" : "(playing)");
-                break;
-            case AppSource::State::WaitingForApp:
-                ImGui::Text("%s", name.c_str());
-                ImGui::SameLine();
-                ImGui::TextDisabled("(waiting for it to start)");
-                break;
-            case AppSource::State::Failed:
-                ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s: %s", name.c_str(), app->lastError().c_str());
-                break;
-            }
+        const auto* app = static_cast<AppSource*>(src);
+        const std::string name = appDisplayName(app->exeName());
+        switch (app->state()) {
+        case AppSource::State::Capturing:
+            ImGui::Text("%s", name.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled(app->isRerouted() ? "(only via mixer)" : "(playing)");
+            break;
+        case AppSource::State::WaitingForApp:
+            ImGui::Text("%s", name.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled("(waiting for it to start)");
+            break;
+        case AppSource::State::Failed:
+            ImGui::TextColored(themeColors().errorText, "%s: %s", name.c_str(), app->lastError().c_str());
+            break;
         }
         ImGui::PopID();
     }
     if (shown == 0) {
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled(appCaptureSupported() ? "Empty. Add apps or a mic below." : "Empty. Add a mic below.");
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled(appCaptureSupported() ? "No apps yet. Click \"+ App\" to add one or more."
+                                                  : "Putting apps in channels works on Windows only for now.");
+        ImGui::PopTextWrapPos();
     }
     ImGui::EndChild();
 
-    if (appCaptureSupported()) {
-        if (ImGui::Button("+ App")) {
-            audioApps_ = listAudioApps();
-            outputDevices_ = listOutputDevices();
-            appExeBuf_[0] = '\0';
-            ImGui::OpenPopup("app");
-        }
-        ImGui::SameLine();
+    ImGui::BeginDisabled(!appCaptureSupported());
+    if (ImGui::Button("+ App")) {
+        audioApps_ = listAudioApps();
+        outputDevices_ = listOutputDevices();
+        appExeBuf_[0] = '\0';
+        ImGui::OpenPopup("app");
     }
-    if (ImGui::Button("+ Mic")) {
-        captureDevices_ = engine_.captureDeviceNames();
-        ImGui::OpenPopup("input");
-    }
-    if (ch.sourceCount() > 1) {
+    ImGui::EndDisabled();
+    if (shown > 1) {
         ImGui::SameLine();
         if (ImGui::Button("Clear all")) {
             engine_.mixer().clearSources(&ch);
@@ -714,50 +761,97 @@ void MixerUI::drawSources(Strip& strip)
         drawAppRoutingSettings();
         ImGui::EndPopup();
     }
-    if (ImGui::BeginPopup("input")) {
-        if (ImGui::Selectable(kDefaultMicName)) {
-            addInput(strip, "");
-        }
+}
+
+void MixerUI::drawMicSource(Strip& strip)
+{
+    Channel& ch = *strip.channel;
+    const float rowH = ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginChild("sources", ImVec2(-1.0f, rowH * kSourceRows), ImGuiChildFlags_None);
+
+    const AudioSource* src = ch.source(0);
+    for (int i = 1; !src && i < Channel::kMaxSources; ++i) src = ch.source(i);
+    const std::string current = src && src->kind() == SourceKind::Input
+                              ? static_cast<const InputSource*>(src)->deviceName()
+                              : std::string("None");
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Microphone");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##mic", current.c_str())) {
+        if (ImGui::IsWindowAppearing()) captureDevices_ = engine_.captureDeviceNames();
+        if (ImGui::Selectable(kDefaultMicName, current == kDefaultMicName)) addInput(strip, "");
         for (const std::string& name : captureDevices_) {
-            if (ImGui::Selectable(name.c_str())) {
-                addInput(strip, name);
-            }
+            if (ImGui::Selectable(name.c_str(), name == current)) addInput(strip, name);
         }
-        if (captureDevices_.empty()) {
-            ImGui::TextDisabled("No microphones found");
-        }
-        ImGui::EndPopup();
+        if (captureDevices_.empty()) ImGui::TextDisabled("No microphones found");
+        ImGui::Separator();
+        if (ImGui::Selectable("None", src == nullptr)) engine_.mixer().clearSources(&ch);
+        ImGui::EndCombo();
     }
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled(ch.mute.load() ? "Muted: the bar shows your mic works. Unmute (M) to hear yourself; use headphones."
+                                       : "You hear yourself now. Use headphones, or mute (M) to stop the echo.");
+    ImGui::PopTextWrapPos();
+    ImGui::EndChild();
+    ImGui::Dummy(ImVec2(0.0f, ImGui::GetFrameHeight())); // lines up with the "+ App" row of app channels
 }
 
 void MixerUI::drawHelp()
 {
-    // BulletText never wraps in Dear ImGui, so long lines ran off the window.
-    const auto helpBullet = [](const char* text) {
-        ImGui::Bullet();
-        ImGui::TextWrapped("%s", text);
-    };
-    ImGui::SetNextWindowSize(ImVec2(560, 520), ImGuiCond_FirstUseEver);
+    // Docked to the right edge and sized from the main window every frame, so it follows resizes.
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float width = std::min(vp->WorkSize.x, std::max(vp->WorkSize.x * 0.38f, 380.0f * uiScale_));
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - width, vp->WorkPos.y), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(width, vp->WorkSize.y), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(1.0f); // the strips behind must not show through the text
-    if (!ImGui::Begin("Help", &showHelp_, ImGuiWindowFlags_NoSavedSettings)) {
+    if (!ImGui::Begin("Help", &showHelp_, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse
+                                              | ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::End();
         return;
     }
+    // Bullet + TextWrapped: BulletText never wraps in Dear ImGui.
+    const auto item = [](const char* text) {
+        ImGui::Bullet();
+        ImGui::TextWrapped("%s", text);
+    };
     ImGui::SeparatorText("Master (top row)");
-    helpBullet("Pick where you listen: \"System default\" follows Windows; or choose your headphones or speakers.");
-    helpBullet("Volume changes everything at once. The bar next to it shows how loud the whole mix is.");
-    ImGui::SeparatorText("Channels");
-    helpBullet("Each channel is a group, like Music or Game. \"+ App\" puts apps in it; you can add several.");
-    helpBullet("An app that isn't running yet is waiting; it joins by itself when it starts.");
-    helpBullet("\"+ Mic\" adds a microphone. The Mic channel starts muted so you don't hear yourself; its bar still moves when you talk.");
-    helpBullet("Apps you never put in a channel keep playing normally on your Windows default output.");
-    ImGui::SeparatorText("Volume and meters");
-    helpBullet("Volume is 0-100%. Drag a fader up or down.");
-    helpBullet("Meters: green is normal, yellow is loud, red means it is at the limit; turn something down.");
-    helpBullet("M mutes a channel. S (solo) plays only the soloed channels.");
+    item("Output: where you listen. \"System default\" follows Windows; or pick your headphones or speakers.");
+    item("Volume: the whole mix, 0-100%. The bar next to it shows how loud everything is together.");
+
+    ImGui::SeparatorText("Buttons under it");
+    item("+ Add channel: a new channel for apps.");
+    item("+ Add mic channel: a channel for a microphone.");
+    item("Presets: rename or delete your own EQ presets.");
+    item("Theme: Dark, Midnight or Light.");
+    item("Reset channels: back to Music, Game, Film, Chat, Podcast and Mic.");
+
+    ImGui::SeparatorText("App channels");
+    item("\"+ App\" puts apps in a channel. Pick as many as you like, e.g. Spotify and a browser in Music.");
+    item("An app can be in one channel at a time. Picking it in another channel moves it there.");
+    item("A closed app shows \"waiting for it to start\" and joins by itself when it starts.");
+    item("The small x next to an app takes it out of the channel. Clear all empties the channel.");
+    item("Apps you never put in a channel play normally, as if the mixer wasn't there.");
+    item("\"Hear apps only through the mixer\" (in the + App window) moves each app's own sound to a spare output, "
+         "so you don't hear it twice. With only one output device you will hear it twice. "
+         "\"Reset all app outputs\" puts every app back to normal.");
+
+    ImGui::SeparatorText("Mic channel");
+    item("Choose your microphone in the list at the top of the channel.");
+    item("It starts muted, so you don't hear yourself. The bar still moves when you talk, so you can see it works.");
+    item("Unmute (M) to hear yourself, e.g. to check how you sound. Use headphones, or the speakers echo.");
+
+    ImGui::SeparatorText("Every channel");
+    item("Name: click it to rename. The x in the corner removes the channel.");
+    item("Volume: 0-100%. The meter beside it is green when normal, yellow when loud, and red at the limit. "
+         "The thin line shows the latest peak.");
+    item("Balance: left or right; it snaps to the center.");
+    item("M mutes the channel. S (solo) plays only the soloed channels.");
+
     ImGui::SeparatorText("Equalizer");
-    helpBullet("The 10 sliders change bass (left) to treble (right). Up is louder, down is quieter, middle is unchanged.");
-    helpBullet("Pick a preset from the list, or shape your own and press Save. Double-click a slider to reset it.");
+    item("10 sliders from deep bass (31 Hz, left) to treble (16k, right). Up is louder, down is quieter, the middle is unchanged.");
+    item("The curve above the sliders shows the overall shape.");
+    item("Pick a preset from the list. A * means you changed it. Save stores your own; pick Flat to undo every change.");
     ImGui::End();
 }
 
@@ -795,7 +889,7 @@ void MixerUI::drawPresetRow(Strip& strip)
             }
         }
         if (!presetError_.empty()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", presetError_.c_str());
+            ImGui::TextColored(themeColors().errorText, "%s", presetError_.c_str());
         }
         ImGui::EndPopup();
     }
@@ -813,11 +907,6 @@ void MixerUI::drawEq(Strip& strip)
         ImGui::PushID(b);
         if (ImGui::VSliderFloat("##band", ImVec2(kBandWidth, kSliderHeight), &gains[b], kEqMinGainDb, kEqMaxGainDb, "", ImGuiSliderFlags_NoInput)) {
             ch.setGain(b, gains[b]);
-            strip.presetModified = true;
-            strip.curveDirty = true;
-        }
-        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            ch.setGain(b, 0.0f);
             strip.presetModified = true;
             strip.curveDirty = true;
         }
@@ -902,7 +991,7 @@ void MixerUI::drawPresetManager()
         }
     }
     if (!presetError_.empty()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", presetError_.c_str());
+        ImGui::TextColored(themeColors().errorText, "%s", presetError_.c_str());
     }
     ImGui::End();
 }

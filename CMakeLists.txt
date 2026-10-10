@@ -83,7 +83,8 @@ if(PSM_BUILD_APP)
     add_executable(PocketSoundMixer
         src/app/main.cpp
         src/app/MixerUI.cpp
-        src/app/Session.cpp)
+        src/app/Session.cpp
+        src/app/Theme.cpp)
     target_link_libraries(PocketSoundMixer PRIVATE psm_core imgui)
     if(WIN32)
         # GUI app without a console window, but keep the standard main() entry point.

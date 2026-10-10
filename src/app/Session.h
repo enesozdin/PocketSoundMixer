@@ -18,6 +18,7 @@ struct SourceConfig {
 // What the app restores on the next launch: the channel layout and every strip's settings.
 struct ChannelConfig {
     std::string name;
+    std::string kind = "apps"; // "apps" (apps go in it) | "mic" (one microphone)
     std::string preset = "Flat";
     EqGains gainsDb{};
     float volume = 1.0f; // linear, 0..1
@@ -30,6 +31,7 @@ struct ChannelConfig {
 struct SessionConfig {
     float masterVolume = 1.0f;
     std::string outputDevice;    // where the mixer plays; empty = system default
+    std::string theme = "Dark";  // "Dark" | "Midnight" | "Light"
     bool appAutoRoute = true;    // park captured apps' own output so they are heard once
     std::string appSilentOutput; // device name to park them on; empty = pick automatically
     std::vector<ChannelConfig> channels;
