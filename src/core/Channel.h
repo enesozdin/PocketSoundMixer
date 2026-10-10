@@ -32,6 +32,7 @@ public:
     std::atomic<float> pan{0.0f};    // balance, -1 (left) .. +1 (right)
     std::atomic<bool> mute{false};
     std::atomic<bool> solo{false};
+    std::atomic<int> output{0};      // Mixer output index: 0 = Master device, 1.. = extra devices
 
     // Post-fader peak since the last call, then cleared. side: 0 = left, 1 = right.
     // Measured even while muted, so a muted mic still shows that it hears you.

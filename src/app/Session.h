@@ -26,6 +26,7 @@ struct ChannelConfig {
     bool mute = false;
     bool solo = false;
     std::vector<SourceConfig> sources;
+    std::string output; // device this channel plays on; empty = Automatic (the Master output)
 };
 
 struct SessionConfig {

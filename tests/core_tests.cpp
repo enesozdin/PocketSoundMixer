@@ -270,6 +270,44 @@ void testSeveralSourcesInOneChannel()
     CHECK_NEAR(out[1000], 0.0f, 1e-9f);
 }
 
+void testChannelOnExtraOutput()
+{
+    psm::Mixer mixer(kRate);
+    psm::Channel* music = mixer.addChannel("Music");
+    psm::Channel* chat = mixer.addChannel("Chat");
+    mixer.addSource(music, std::make_unique<ConstSource>(0.25f, nullptr));
+    mixer.addSource(chat, std::make_unique<ConstSource>(0.5f, nullptr));
+    chat->output = 1; // e.g. a headset
+
+    std::vector<float> out(512 * 2);
+    std::vector<float> extra(512 * 2);
+    auto settle = [&] { mixer.process(out.data(), 512); mixer.process(out.data(), 512); };
+
+    settle(); // no bus 1 yet: chat falls back to the Master device
+    CHECK_NEAR(out[1000], 0.75f, 1e-5f);
+
+    auto bus = std::make_unique<psm::OutputBus>(4096);
+    psm::OutputBus* raw = bus.get();
+    mixer.setOutputBus(1, std::move(bus));
+    settle();
+    CHECK_NEAR(out[1000], 0.25f, 1e-5f);        // Master hears only music
+    CHECK(raw->ring.available() >= 1024);
+    raw->ring.read(extra.data(), 512, 0, 100000);
+    raw->ring.read(extra.data(), 512, 0, 100000);
+    CHECK_NEAR(extra[1000], 0.5f, 1e-5f);       // the headset gets chat, master volume applied
+    mixer.masterVolume = 0.5f;
+    settle();
+    raw->ring.read(extra.data(), 512, 0, 100000);
+    raw->ring.read(extra.data(), 512, 0, 100000);
+    CHECK_NEAR(extra[1000], 0.25f, 1e-5f);
+
+    mixer.setOutputBus(1, nullptr); // device closed: back to Master, bus freed later
+    mixer.masterVolume = 1.0f;
+    settle();
+    CHECK_NEAR(out[1000], 0.75f, 1e-5f);
+    mixer.collectGarbage();
+}
+
 void testMutedChannelStillMeters()
 {
     psm::Mixer mixer(kRate);
@@ -299,12 +337,14 @@ void testSessionRoundTripAndOldFormat()
     s.outputDevice = "Headphones";
     s.theme = "Light";
     s.channels[0].sources = {{"app", "Spotify.exe", {}}, {"app", "chrome.exe", {}}};
+    s.channels[3].output = "Headset";
     const auto file = std::filesystem::temp_directory_path() / "psm_test_session.json";
     CHECK(psm::saveSession(file, s, &err));
     psm::SessionConfig loaded;
     CHECK(psm::loadSession(file, loaded, &err));
     CHECK(loaded.outputDevice == "Headphones");
     CHECK(loaded.theme == "Light");
+    CHECK(loaded.channels[3].output == "Headset" && loaded.channels[0].output.empty());
     CHECK(loaded.channels.back().kind == "mic" && loaded.channels.back().sources.size() == 1);
     CHECK(loaded.channels.size() == 6);
     CHECK(loaded.channels[0].sources.size() == 2 && loaded.channels[0].sources[1].appExe == "chrome.exe");
@@ -385,6 +425,7 @@ int main()
     testRingBuffer();
     testSeveralSourcesInOneChannel();
     testMutedChannelStillMeters();
+    testChannelOnExtraOutput();
     testSessionRoundTripAndOldFormat();
     testEngineStartsWithMissingOutputDevice();
     if (g_failures == 0) {

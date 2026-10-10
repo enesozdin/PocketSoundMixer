@@ -26,9 +26,9 @@ bool appCaptureSupported();
 std::vector<OutputDeviceInfo> listOutputDevices();
 
 // A device the user is unlikely to listen to, for parking captured apps: the first active
-// output that is neither the system default nor `mixerOutputName` (where the mixer plays).
+// output that is neither the system default nor one of `inUseNames` (where the mixer plays).
 // Empty when there is no such device.
-std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>& devices, const std::string& mixerOutputName);
+std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>& devices, const std::vector<std::string>& inUseNames);
 
 // Apps that currently have an audio session on any active output device.
 std::vector<AudioAppInfo> listAudioApps();

@@ -44,6 +44,7 @@ private:
     struct Strip {
         Channel* channel = nullptr;
         bool isMic = false; // mic channel: one microphone instead of apps
+        std::string outputDevice; // the user's choice, kept even while unplugged; empty = Automatic (Master)
         std::string preset = "Flat";
         bool presetModified = false;
         std::array<char, 64> nameBuf{};
@@ -64,6 +65,10 @@ private:
     std::string silentOutputId();
     void reopenAppChannels();
     void selectOutput(const std::string& name);
+    void applyChannelOutput(Strip& strip);
+    void closeUnusedOutputs();
+    std::vector<std::string> outputsInUse() const;
+    void drawOutputRow(Strip& strip);
     void drawAppRoutingSettings();
     void applyPreset(Strip& strip, const Preset& preset);
     void updateCurve(Strip& strip);

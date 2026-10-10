@@ -36,6 +36,13 @@ public:
     // Moves the mixer to another output (empty = system default). Channels keep playing.
     bool setOutputDevice(const std::string& name, std::string* error);
     std::vector<std::string> captureDeviceNames(); // refreshes the device list
+
+    // Mixer output index for a device a channel should play on: 0 = the Master device
+    // (also for an empty name). Opens an extra device on first use, up to Mixer::kMaxOutputs - 1.
+    // On failure returns 0 and sets `error`, so the channel keeps playing on Master.
+    int outputFor(const std::string& deviceName, std::string* error);
+    // Closes the extra devices whose index is not in `inUse`.
+    void closeUnusedOutputs(const std::vector<int>& inUse);
     std::unique_ptr<InputSource> openInput(const std::string& deviceName, std::string* error);
     // Windows only. `silentOutputId`: where the app's own output is parked while captured (empty = leave it).
     std::unique_ptr<AppSource> openApp(const std::string& exeName, const std::string& silentOutputId, std::string* error);

@@ -68,6 +68,7 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
         cc.pan = std::clamp(c.value("pan", 0.0f), -1.0f, 1.0f);
         cc.mute = c.value("mute", false);
         cc.solo = c.value("solo", false);
+        cc.output = c.value("output", std::string());
         if (c.contains("sources") && c["sources"].is_array()) {
             for (const auto& src : c["sources"]) {
                 if (!src.is_object()) continue;
@@ -111,7 +112,7 @@ bool saveSession(const std::filesystem::path& file, const SessionConfig& session
         }
         j["channels"].push_back({
             {"name", c.name}, {"kind", c.kind}, {"preset", c.preset}, {"gains", c.gainsDb},
-            {"volume", c.volume}, {"pan", c.pan}, {"mute", c.mute}, {"solo", c.solo},
+            {"volume", c.volume}, {"pan", c.pan}, {"mute", c.mute}, {"solo", c.solo}, {"output", c.output},
             {"sources", std::move(sources)},
         });
     }

@@ -12,7 +12,7 @@ std::vector<OutputDeviceInfo> listOutputDevices() { return {}; }
 
 void resetAllAppOutputs() {}
 
-std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>&, const std::string&) { return {}; }
+std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>&, const std::vector<std::string>&) { return {}; }
 
 void openAppVolumeSettings() {}
 
@@ -586,10 +586,10 @@ std::vector<OutputDeviceInfo> listOutputDevices()
     return out;
 }
 
-std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>& devices, const std::string& mixerOutputName)
+std::string pickSilentOutputId(const std::vector<OutputDeviceInfo>& devices, const std::vector<std::string>& inUseNames)
 {
     for (const OutputDeviceInfo& d : devices) {
-        if (!d.isDefault && d.name != mixerOutputName) return d.id;
+        if (!d.isDefault && std::find(inUseNames.begin(), inUseNames.end(), d.name) == inUseNames.end()) return d.id;
     }
     return {};
 }

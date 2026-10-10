@@ -27,7 +27,7 @@ To get back to these six channels at any time, click **Reset channels** and conf
 
 | Control | What it does |
 |---|---|
-| Output list | Where the mixer plays. **System default** follows the default device in Windows, so it changes when you switch devices there. You can also pick specific headphones or speakers. The choice is remembered. |
+| Master output | Where the mixer plays. **System default** follows the default device in Windows, so it changes when you switch devices there. You can also pick specific headphones or speakers. The choice is remembered. |
 | Volume | Turns the whole mix up or down. |
 | Meter | Shows how loud everything together is. The top bar is the left side and the bottom bar is the right side. |
 
@@ -52,7 +52,7 @@ Some things to know about apps in channels:
 
 The mixer has to capture the app's sound. If the app also kept playing on your speakers, you would hear it twice. So by default (**Hear apps only through the mixer**, in the + App popup) the mixer moves the app's own output to a *spare* device you don't listen to, such as monitor/HDMI audio. The app goes back to normal when you take it out of the channel or close the mixer.
 
-- The spare device is never the one picked in the Master row.
+- The spare device is never one you listen on: not the Master output, and not a device a channel plays on.
 - If your PC has only one output device, there is nowhere to move the app, so you will hear it twice. Connect a second output (a monitor with speakers, or a USB headset), or install the free VB-Cable driver.
 - If an app ever stays silent after the mixer crashed, open the + App popup and click **Reset all app outputs**.
 
@@ -69,6 +69,7 @@ Need a second mic? Click **+ Add mic channel**.
 | Control | What it does |
 |---|---|
 | Name | Click it to rename the channel. |
+| Output | Where this channel plays. **Automatic (Master)** follows the Master output. Pick a device to send only this channel there, for example chat to a headset and music to the speakers. Your choice is kept, even while the device is unplugged; the channel plays on Master until it is back. Up to 3 devices besides the Master output can be used at once. |
 | **x** (top right) | Removes the channel. |
 | Volume fader | 0 % to 100 %. It changes loudness in steps your ear hears as even: 50 % is clearly quieter, and 10 % is barely audible. |
 | Meter | Green is normal, yellow is loud, and red means the sound is at the limit, so turn something down. The thin line shows the latest peak for a moment. On a muted channel the meter is greyed out but still moves. |

@@ -5,6 +5,7 @@
 #include "miniaudio.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstring>
 
@@ -136,6 +137,21 @@ private:
 } // namespace
 
 // -------------------------------------------------------------------------------------------------
+// An extra output device that plays one OutputBus. Its callback only copies from the ring.
+struct ExtraOutput {
+    std::string name;
+    ma_device device{};
+    OutputBus* bus = nullptr; // owned by the Mixer; outlives the device
+    uint32_t targetLatency = 960;
+    uint32_t maxLatency = 2880;
+
+    static void onPlayback(ma_device* device, void* output, const void*, ma_uint32 frames)
+    {
+        auto* self = static_cast<ExtraOutput*>(device->pUserData);
+        self->bus->ring.read(static_cast<float*>(output), frames, self->targetLatency, self->maxLatency);
+    }
+};
+
 struct AudioEngine::Impl {
     ma_context context{};
     ma_device device{};
@@ -148,6 +164,25 @@ struct AudioEngine::Impl {
     std::unique_ptr<Mixer> mixer;
     std::vector<ma_device_info> playbackDevices;
     std::vector<ma_device_info> captureDevices;
+    std::array<std::unique_ptr<ExtraOutput>, Mixer::kMaxOutputs> extras; // [0] unused: the Master device
+
+    void closeExtra(int index)
+    {
+        if (!extras[index]) return;
+        ma_device_uninit(&extras[index]->device); // joins its thread before the bus is retired
+        extras[index].reset();
+        mixer->setOutputBus(index, nullptr);
+    }
+
+    const ma_device_id* playbackId(const std::string& name)
+    {
+        if (name.empty()) return nullptr;
+        if (playbackDevices.empty()) refreshDevices();
+        for (const ma_device_info& d : playbackDevices) {
+            if (name == d.name) return &d.id;
+        }
+        return nullptr;
+    }
 
     void refreshDevices()
     {
@@ -168,16 +203,7 @@ struct AudioEngine::Impl {
     // rate; miniaudio resamples only if the new device runs at a different one.
     ma_result openDevice(const std::string& name, uint32_t sampleRate)
     {
-        const ma_device_id* id = nullptr;
-        if (!name.empty()) {
-            if (playbackDevices.empty()) refreshDevices();
-            for (const ma_device_info& d : playbackDevices) {
-                if (name == d.name) {
-                    id = &d.id;
-                    break;
-                }
-            }
-        }
+        const ma_device_id* id = playbackId(name);
         ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
         cfg.playback.pDeviceID = id; // null: default device, and miniaudio follows default changes
         cfg.playback.format = ma_format_f32;
@@ -217,6 +243,9 @@ AudioEngine::AudioEngine()
 AudioEngine::~AudioEngine()
 {
     stop();
+    for (int i = 1; i < Mixer::kMaxOutputs; ++i) {
+        impl_->closeExtra(i);
+    }
     if (impl_->deviceReady) {
         ma_device_uninit(&impl_->device);
     }
@@ -336,6 +365,76 @@ bool AudioEngine::setOutputDevice(const std::string& name, std::string* error)
     }
     m.running = true;
     return true;
+}
+
+int AudioEngine::outputFor(const std::string& deviceName, std::string* error)
+{
+    Impl& m = *impl_;
+    if (deviceName.empty() || (m.deviceReady && deviceName == m.outputName)) return 0;
+    for (int i = 1; i < Mixer::kMaxOutputs; ++i) {
+        if (m.extras[i] && m.extras[i]->name == deviceName) return i;
+    }
+    if (!m.contextReady) {
+        if (error) *error = "Audio backend is not available";
+        return 0;
+    }
+    int index = 0;
+    for (int i = 1; i < Mixer::kMaxOutputs && index == 0; ++i) {
+        if (!m.extras[i]) index = i;
+    }
+    if (index == 0) {
+        if (error) *error = "Up to " + std::to_string(Mixer::kMaxOutputs - 1) + " extra outputs; playing on Master";
+        return 0;
+    }
+    m.refreshDevices();
+    const ma_device_id* id = m.playbackId(deviceName);
+    if (!id) {
+        if (error) *error = "\"" + deviceName + "\" is not connected; playing on Master";
+        return 0;
+    }
+
+    const uint32_t rate = static_cast<uint32_t>(mixer().sampleRate());
+    auto extra = std::make_unique<ExtraOutput>();
+    extra->name = deviceName;
+    extra->targetLatency = rate / 50;     // 20 ms
+    extra->maxLatency = rate * 3 / 50;    // 60 ms, beyond this the backlog is dropped (clock drift)
+    auto bus = std::make_unique<OutputBus>(rate / 5);
+    extra->bus = bus.get();
+
+    ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
+    cfg.playback.pDeviceID = id;
+    cfg.playback.format = ma_format_f32;
+    cfg.playback.channels = 2;
+    cfg.sampleRate = rate; // same as the mix; miniaudio resamples only if the device differs
+    cfg.periodSizeInMilliseconds = 10;
+    cfg.performanceProfile = ma_performance_profile_low_latency;
+    cfg.noPreSilencedOutputBuffer = MA_TRUE; // the ring read always fills the whole buffer
+    cfg.noClip = MA_TRUE;
+    cfg.dataCallback = &ExtraOutput::onPlayback;
+    cfg.pUserData = extra.get();
+    ma_result r = ma_device_init(&m.context, &cfg, &extra->device);
+    if (r != MA_SUCCESS) {
+        if (error) *error = "Cannot open \"" + deviceName + "\": " + resultText(r) + "; playing on Master";
+        return 0;
+    }
+    mixer().setOutputBus(index, std::move(bus)); // the mixer starts filling it right away
+    r = ma_device_start(&extra->device);
+    m.extras[index] = std::move(extra);
+    if (r != MA_SUCCESS) {
+        m.closeExtra(index);
+        if (error) *error = "Cannot start \"" + deviceName + "\": " + resultText(r) + "; playing on Master";
+        return 0;
+    }
+    return index;
+}
+
+void AudioEngine::closeUnusedOutputs(const std::vector<int>& inUse)
+{
+    for (int i = 1; i < Mixer::kMaxOutputs; ++i) {
+        if (impl_->extras[i] && std::find(inUse.begin(), inUse.end(), i) == inUse.end()) {
+            impl_->closeExtra(i);
+        }
+    }
 }
 
 std::vector<std::string> AudioEngine::captureDeviceNames()

@@ -9,6 +9,7 @@ A lightweight desktop sound mixer for Windows, macOS and Linux. You can add or r
 - **10-band graphic EQ per channel** at 31 Hz to 16 kHz, ±12 dB.
 - **Presets**: 10 built-in ones (Flat, Bass Boost, Treble Boost, Vocal, Loudness, Music, Game, Film, Chat, Podcast) plus as many of your own as you want. Use **Save** on a channel to create one and the **Presets** window to rename or delete.
 - **Several apps per channel** on Windows (for example Spotify and YouTube in Chrome both in Music), up to 8. Microphones have their own Mic channel.
+- **Per-channel output**: each channel plays on the Master output ("Automatic") or on a device you pick, e.g. chat on a headset and music on the speakers. Up to 3 extra devices.
 - **Themes**: Dark, Midnight and Light.
 - Volume in percent (0-100 %), balance, mute, solo and peak meters on each channel. Meters use the broadcast (IEC 60268-18) scale with a peak-hold line, and keep moving on a muted channel.
 - A **Help** window in the app, and a [user guide](docs/USER_GUIDE.md).
@@ -49,6 +50,7 @@ UI thread (Dear ImGui)                      Audio thread (miniaudio callback)
   - `Mixer`: a fixed array of 64 atomic slots. Removed channels and sources go to a graveyard and are freed only once the audio thread has moved past them, so the audio thread never locks, allocates or frees.
   - `Channel`: lock-free parameters as atomics, with gain ramps per block so fader moves don't click. Up to 8 sources sit in atomic slots and are summed before the EQ, so one channel can hold several apps.
   - `AudioEngine`: the output device (switchable at runtime) and live capture through a lock-free ring buffer. miniaudio is built without its decoders and resource manager.
+  - Extra outputs: the audio thread mixes each channel into the bus of its output; extra devices drain their bus from a wait-free ring (20 ms target latency, clamped against clock drift), so every source is still read by one thread.
   - `Presets`: built-in presets plus user presets stored as JSON.
 - `src/app`: the GLFW + OpenGL3 + Dear ImGui front end. The app sleeps in `glfwWaitEventsTimeout` and only redraws at about 30 fps while meters are moving.
 

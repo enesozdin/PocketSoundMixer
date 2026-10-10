@@ -170,6 +170,8 @@ void MixerUI::applySession(const SessionConfig& session)
         ch.pan = c.pan;
         ch.mute = c.mute;
         ch.solo = c.solo;
+        s->outputDevice = c.output;
+        applyChannelOutput(*s); // before the apps, so none gets parked on this device
         for (const SourceConfig& src : c.sources) {
             if (src.type == "input") {
                 addInput(*s, src.inputDevice);
@@ -193,6 +195,7 @@ SessionConfig MixerUI::captureSession() const
         ChannelConfig c;
         c.name = ch.name();
         c.kind = s.isMic ? "mic" : "apps";
+        c.output = s.outputDevice;
         c.preset = s.preset;
         c.gainsDb = ch.gains();
         c.volume = ch.volume.load();
@@ -236,6 +239,32 @@ void MixerUI::removeStrip(size_t index)
 {
     engine_.mixer().removeChannel(strips_[index].channel);
     strips_.erase(strips_.begin() + static_cast<std::ptrdiff_t>(index));
+    closeUnusedOutputs();
+}
+
+void MixerUI::applyChannelOutput(Strip& strip)
+{
+    std::string err;
+    strip.channel->output = engine_.outputFor(strip.outputDevice, &err);
+    strip.error = err; // on failure the choice is kept; it plays on Master meanwhile
+}
+
+void MixerUI::closeUnusedOutputs()
+{
+    std::vector<int> inUse;
+    for (const Strip& s : strips_) {
+        inUse.push_back(s.channel->output.load());
+    }
+    engine_.closeUnusedOutputs(inUse);
+}
+
+std::vector<std::string> MixerUI::outputsInUse() const
+{
+    std::vector<std::string> names{engine_.outputDeviceName()};
+    for (const Strip& s : strips_) {
+        if (!s.outputDevice.empty() && s.channel->output.load() > 0) names.push_back(s.outputDevice);
+    }
+    return names;
 }
 
 void MixerUI::addInput(Strip& strip, const std::string& deviceName)
@@ -322,13 +351,15 @@ std::string MixerUI::silentOutputId()
 {
     if (!appAutoRoute_) return {};
     if (outputDevices_.empty()) outputDevices_ = listOutputDevices();
-    const std::string& mixerOutput = engine_.outputDeviceName();
+    const std::vector<std::string> inUse = outputsInUse(); // never park apps where you listen
     if (!appSilentOutput_.empty()) {
         for (const OutputDeviceInfo& d : outputDevices_) {
-            if (d.name == appSilentOutput_ && !d.isDefault && d.name != mixerOutput) return d.id;
+            if (d.name == appSilentOutput_ && !d.isDefault && std::find(inUse.begin(), inUse.end(), d.name) == inUse.end()) {
+                return d.id;
+            }
         }
     }
-    return pickSilentOutputId(outputDevices_, mixerOutput);
+    return pickSilentOutputId(outputDevices_, inUse);
 }
 
 void MixerUI::reopenAppChannels()
@@ -357,6 +388,9 @@ void MixerUI::selectOutput(const std::string& name)
     std::string err;
     engine_.setOutputDevice(name, &err);
     status_ = err;
+    // A channel may have picked the device that is now the Master: it then plays through Master.
+    for (Strip& s : strips_) applyChannelOutput(s);
+    closeUnusedOutputs();
     // The spare output for parked apps must never be the one the mixer now plays on.
     outputDevices_.clear();
     reopenAppChannels();
@@ -398,6 +432,9 @@ void MixerUI::drawAppRoutingSettings()
         }
         for (const OutputDeviceInfo& d : outputDevices_) {
             if (d.isDefault || d.name == engine_.outputDeviceName()) continue; // you listen there
+            bool used = false;
+            for (const Strip& s : strips_) used |= s.outputDevice == d.name;
+            if (used) continue;
             if (ImGui::Selectable(d.name.c_str(), d.name == appSilentOutput_)) {
                 appSilentOutput_ = d.name;
                 reopenAppChannels();
@@ -497,7 +534,7 @@ void MixerUI::drawMasterBar(float dt)
     Mixer& mixer = engine_.mixer();
 
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Master");
+    ImGui::TextUnformatted("Master output");
     ImGui::SameLine();
 
     // Where everything you hear comes out. "System default" follows Windows' default device.
@@ -615,6 +652,7 @@ void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
 
     if (strip.isMic) drawMicSource(strip);
     else drawAppSources(strip);
+    drawOutputRow(strip);
     drawPresetRow(strip);
     if (strip.curveDirty) {
         updateCurve(strip);
@@ -797,6 +835,42 @@ void MixerUI::drawMicSource(Strip& strip)
     ImGui::Dummy(ImVec2(0.0f, ImGui::GetFrameHeight())); // lines up with the "+ App" row of app channels
 }
 
+void MixerUI::drawOutputRow(Strip& strip)
+{
+    // Where this channel plays. Automatic follows the Master output; a picked device stays picked.
+    const bool following = strip.outputDevice.empty();
+    std::string label = following ? "Automatic (Master)" : strip.outputDevice;
+    if (!following && strip.channel->output.load() == 0 && strip.outputDevice != engine_.outputDeviceName()) {
+        label += " (not connected)";
+    }
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Output");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##chout", label.c_str())) {
+        if (ImGui::IsWindowAppearing()) playbackDevices_ = engine_.outputDeviceNames();
+        std::string pick;
+        bool picked = false;
+        if (ImGui::Selectable("Automatic (Master)", following)) {
+            picked = true;
+        }
+        for (const std::string& name : playbackDevices_) {
+            if (ImGui::Selectable(name.c_str(), name == strip.outputDevice)) {
+                pick = name;
+                picked = true;
+            }
+        }
+        ImGui::EndCombo();
+        if (picked && pick != strip.outputDevice) {
+            strip.outputDevice = pick;
+            applyChannelOutput(strip);
+            closeUnusedOutputs();
+            reopenAppChannels(); // a parked app may sit on the device this channel now uses
+        }
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Speakers or headphones this channel plays on");
+}
+
 void MixerUI::drawHelp()
 {
     // Docked to the right edge and sized from the main window every frame, so it follows resizes.
@@ -816,7 +890,7 @@ void MixerUI::drawHelp()
         ImGui::TextWrapped("%s", text);
     };
     ImGui::SeparatorText("Master (top row)");
-    item("Output: where you listen. \"System default\" follows Windows; or pick your headphones or speakers.");
+    item("Master output: where you listen. \"System default\" follows Windows; or pick your headphones or speakers.");
     item("Volume: the whole mix, 0-100%. The bar next to it shows how loud everything is together.");
 
     ImGui::SeparatorText("Buttons under it");
@@ -843,6 +917,9 @@ void MixerUI::drawHelp()
 
     ImGui::SeparatorText("Every channel");
     item("Name: click it to rename. The x in the corner removes the channel.");
+    item("Output: where this channel plays. \"Automatic (Master)\" follows the Master output. "
+         "Pick a device to send just this channel there, e.g. chat to a headset and music to speakers. "
+         "Your pick stays, even if the device is unplugged for a while.");
     item("Volume: 0-100%. The meter beside it is green when normal, yellow when loud, and red at the limit. "
          "The thin line shows the latest peak.");
     item("Balance: left or right; it snaps to the center.");
