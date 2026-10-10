@@ -68,7 +68,7 @@ Bu cihazı üst satırda, ana çıkışın yanındaki **Yedek çıkış** ile se
 + Uygulama penceresi de uygulamanın kendi sesinin nereye gittiğini söyler.
 
 - Yedek cihaz asla dinlediğin bir cihaz olmaz: ne ana çıkış, ne de bir kanalın çaldığı cihaz.
-- Bilgisayarında tek bir çıkış cihazı varsa uygulamayı taşıyacak yer yoktur, bu yüzden onu iki kez duyarsın. İkinci bir çıkış bağla (hoparlörlü bir monitör veya USB kulaklık) ya da ücretsiz VB-Cable sürücüsünü kur.
+- Bilgisayarında tek bir çıkış cihazı varsa uygulamayı taşıyacak yer yoktur, bu yüzden onu iki kez duyarsın. İkinci bir çıkış bağla (hoparlörlü bir monitör veya USB kulaklık).
 - Mikser çöktükten sonra bir uygulama sessiz kalırsa **Yedek çıkış**'ı aç ve **Tüm uygulama çıkışlarını sıfırla**'ya tıkla.
 
 ## Mikrofon kanalı
@@ -76,6 +76,10 @@ Bu cihazı üst satırda, ana çıkışın yanındaki **Yedek çıkış** ile se
 Mikrofonların kendi kanalı vardır, böylece uygulama kanallarında yalnızca uygulamalar olur. Mikrofon kanalının üstünde **Varsayılan mikrofon**'u, belirli bir cihazı veya **Yok**'u seç.
 
 Mikrofon kanalı sessizde başlar. Konuştuğunda göstergesi soluk renkte de olsa hareket eder. Kendini duymak için sesi aç (**M** butonu), örneğin bir ekolayzır presetiyle nasıl duyulduğunu kontrol etmek için. Bunu yaparken kulaklık kullan, yoksa hoparlörler mikrofona geri besleme yapar.
+
+### Mikrofon presetleri
+
+Mikrofon kanallarının sesler için hazırlanmış kendi preset listesi vardır: **Flat**, **Clear Voice** (uğultuyu keser, netlik katar), **Warm Voice**, **Broadcast**, **Cut Rumble** (masa darbeleri, vınlama, trafik), **Less Boom** (mikrofona çok yakın oturuyorsan) ve **Less Hiss** (cızırtı). Uygulama kanalları müzik, oyun ve film presetlerini korur. Bir mikrofon kanalında kaydettiğin presetler yalnızca mikrofon kanallarında görünür.
 
 İkinci bir mikrofon mu lazım? **+ Mikrofon kanalı ekle**'ye tıkla.
 
@@ -114,6 +118,7 @@ Birkaç hızlı tarif:
 - Her kanaldaki listeden bir preset seç. Adın sonundaki `*` o zamandan beri sürgüleri değiştirdiğin anlamına gelir.
 - **Kaydet** mevcut sürgüleri bir preset olarak saklar. Yeni bir ad ver, ya da güncellemek için kendi presetlerinden birinin adını kullan.
 - Kaydet'in yanındaki **Sil**, seçili preseti onayladıktan sonra siler. Hazır presetler de silinebilir, **Flat** hariç. Silinen preseti kullanan kanallar mevcut seslerini korur.
+- Uygulama kanallarının ve mikrofon kanallarının listeleri ayrıdır (bkz. [Mikrofon presetleri](#mikrofon-presetleri)).
 - Bir hazır preseti sildikten sonra preset listesinin en altında **Hazır presetleri geri getir** belirir ve hepsini geri getirir. Hazır presetler düzenlenemez.
 
 Preset adları (Flat, Music, Vocal...) ve varsayılan kanal adları senin verindir, bu yüzden Türkçe arayüzde de değişmez. Kanalları istediğin gibi yeniden adlandırabilirsin.

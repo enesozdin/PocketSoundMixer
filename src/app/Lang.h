@@ -34,9 +34,9 @@ enum class Language : std::uint8_t { English, Turkish, Count };
     X(Automatic, "Automatic", "Otomatik") \
     X(SpareNoDevice, \
       "No spare device: every output is one you listen on. Connect a second output " \
-      "(a monitor with audio, a USB headset) or install the free VB-Cable driver.", \
+      "(a monitor with audio, a USB headset).", \
       "Yedek cihaz yok: tüm çıkışları dinliyorsun. İkinci bir çıkış bağla " \
-      "(sesli bir monitör, USB kulaklık) ya da ücretsiz VB-Cable sürücüsünü kur.") \
+      "(sesli bir monitör, USB kulaklık).") \
     X(ResetAppOutputs, "Reset all app outputs", "Tüm uygulama çıkışlarını sıfırla") \
     X(ResetAppOutputsTip, "Puts every app back on your normal output, like Windows' own Reset button.", \
       "Windows'un kendi Sıfırla düğmesi gibi, tüm uygulamaları normal çıkışına geri koyar.") \
@@ -165,6 +165,8 @@ enum class Language : std::uint8_t { English, Turkish, Count };
       "Kendini duymaman için sessizde başlar. Konuşunca çubuk yine de hareket eder, böylece çalıştığını görürsün.") \
     X(HelpMic3, "Unmute (M) to hear yourself, e.g. to check how you sound. Use headphones, or the speakers echo.", \
       "Kendini duymak için sesi aç (M), örneğin nasıl duyulduğunu kontrol etmek için. Kulaklık kullan, yoksa hoparlör yankı yapar.") \
+    X(HelpMic4, "Mic channels have their own presets, made for voices.", \
+      "Mikrofon kanallarının sesler için hazırlanmış kendi presetleri vardır.") \
     X(HelpChannelHead, "Every channel", "Her kanal") \
     X(HelpChannel1, "Name: click it to rename. The x in the corner removes the channel.", \
       "Ad: yeniden adlandırmak için tıkla. Köşedeki x kanalı kaldırır.") \

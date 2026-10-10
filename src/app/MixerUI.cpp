@@ -181,7 +181,7 @@ void MixerUI::applySession(const SessionConfig& session)
         if (!s) break;
         Channel& ch = *s->channel;
         // A saved custom curve wins over the preset, which may have been edited or deleted since.
-        const Preset* p = presets_.find(c.preset);
+        const Preset* p = presets_.find(c.preset, presetKind(*s));
         const bool allZero = std::all_of(c.gainsDb.begin(), c.gainsDb.end(), [](float g) { return g == 0.0f; });
         if (p && (allZero || p->gainsDb == c.gainsDb)) {
             applyPreset(*s, *p);
@@ -1046,6 +1046,7 @@ void MixerUI::drawHelp()
     item(S::HelpMic1);
     item(S::HelpMic2);
     item(S::HelpMic3);
+    item(S::HelpMic4);
 
     ImGui::SeparatorText(tr(S::HelpChannelHead));
     item(S::HelpChannel1);
@@ -1070,15 +1071,17 @@ void MixerUI::drawPresetRow(Strip& strip)
     const float delW = ImGui::CalcTextSize(tr(S::Delete)).x + style.FramePadding.x * 2.0f;
     ImGui::SetNextItemWidth(-(saveW + delW + style.ItemSpacing.x * 2.0f));
     if (ImGui::BeginCombo("##preset", label.c_str())) {
+        const PresetKind kind = presetKind(strip);
         for (const Preset& p : presets_.presets()) {
+            if (p.kind != kind) continue;
             if (ImGui::Selectable(p.name.c_str(), p.name == strip.preset && !strip.presetModified)) {
                 applyPreset(strip, p);
             }
         }
-        if (presets_.hasHiddenBuiltIns()) {
+        if (presets_.hasHiddenBuiltIns(kind)) {
             ImGui::Separator();
             if (ImGui::Selectable(tr(S::RestoreBuiltIns))) {
-                presets_.restoreBuiltIns();
+                presets_.restoreBuiltIns(kind);
                 savePresets();
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tr(S::RestoreBuiltInsTip));
@@ -1087,13 +1090,13 @@ void MixerUI::drawPresetRow(Strip& strip)
     }
     ImGui::SameLine();
     if (ImGui::Button(tr(S::Save), ImVec2(saveW, 0))) {
-        const Preset* current = presets_.find(strip.preset);
+        const Preset* current = presets_.find(strip.preset, presetKind(strip));
         copyToBuf(strip.presetNameBuf, current && !current->builtIn ? strip.preset : std::string());
         presetError_.clear();
         ImGui::OpenPopup("savepreset");
     }
     ImGui::SameLine();
-    const bool deletable = presets_.canRemove(strip.preset);
+    const bool deletable = presets_.canRemove(strip.preset, presetKind(strip));
     ImGui::BeginDisabled(!deletable);
     if (ImGui::Button(tr(S::Delete), ImVec2(delW, 0))) ImGui::OpenPopup("deletepreset");
     ImGui::EndDisabled();
@@ -1104,7 +1107,7 @@ void MixerUI::drawPresetRow(Strip& strip)
         ImGui::Text(tr(S::DeletePresetFmt), strip.preset.c_str());
         ImGui::TextDisabled("%s", tr(S::DeletePresetDetail));
         if (ImGui::Button(tr(S::Delete))) {
-            deletePreset(strip.preset);
+            deletePreset(strip.preset, presetKind(strip));
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
@@ -1118,7 +1121,7 @@ void MixerUI::drawPresetRow(Strip& strip)
         const bool enter = ImGui::InputText("##pname", strip.presetNameBuf.data(), strip.presetNameBuf.size(), ImGuiInputTextFlags_EnterReturnsTrue);
         if (ImGui::Button(tr(S::Save)) || enter) {
             const std::string name = strip.presetNameBuf.data();
-            if (presets_.save(name, strip.channel->gains(), &presetError_)) {
+            if (presets_.save(name, presetKind(strip), strip.channel->gains(), &presetError_)) {
                 savePresets();
                 strip.preset = name;
                 strip.presetModified = false;
@@ -1161,11 +1164,11 @@ void MixerUI::drawEq(Strip& strip)
     ImGui::EndGroup();
 }
 
-void MixerUI::deletePreset(const std::string& name)
+void MixerUI::deletePreset(const std::string& name, PresetKind kind)
 {
-    if (!presets_.remove(name, &presetError_)) return;
+    if (!presets_.remove(name, kind, &presetError_)) return;
     for (Strip& s : strips_) {
-        if (s.preset == name) { // keep the sound, just drop the link
+        if (presetKind(s) == kind && s.preset == name) { // keep the sound, just drop the link
             s.preset = "Custom";
             s.presetModified = false;
         }
