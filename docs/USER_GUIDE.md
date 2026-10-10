@@ -6,6 +6,8 @@ PocketSoundMixer lets you set the volume and sound of each kind of audio on your
 
 Per-app channels need Windows 11, or Windows 10 build 20348 or newer. On macOS and Linux only the Mic channel works for now.
 
+The Windows build is the tested one. The macOS and Linux builds compile and pass the automated tests, but the repository owner has not tried them on a real Mac or Linux PC.
+
 ## First launch
 
 The mixer opens with six channels: **Music**, **Game**, **Film**, **Chat**, **Podcast** and **Mic**. Each channel already has a matching equalizer preset. The channels start empty, so all your apps keep playing exactly as before until you add them to a channel.
@@ -80,6 +82,11 @@ The Mic channel starts muted. Its meter still moves, greyed out, when you talk. 
 Mic channels have their own preset list, made for voices: **Flat**, **Clear Voice** (cuts rumble, adds clarity), **Warm Voice**, **Broadcast**, **Cut Rumble** (desk thumps, hum, traffic), **Less Boom** (when you sit very close to the mic) and **Less Hiss**. App channels keep the music, game and film presets. Presets you save on a mic channel appear only on mic channels.
 
 Need a second mic? Click **+ Add mic channel**.
+
+### What the equalizer changes
+
+- **Apps in a channel**: the sound you hear from them goes through that channel's equalizer and volume. This includes the voices of other people in a voice chat app, once you add the app to a channel.
+- **Your microphone**: the Mic channel's equalizer only changes what the mixer plays, for example when you unmute it to hear yourself. Other apps, such as a voice chat or recording app, still get your microphone as it is, without the equalizer.
 
 ## Channel controls
 

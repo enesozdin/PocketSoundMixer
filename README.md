@@ -15,6 +15,10 @@ A lightweight desktop sound mixer for Windows, macOS and Linux. You can add or r
 - A **Help** window in the app, and a user guide in [English](docs/USER_GUIDE.md) and [Türkçe](docs/USER_GUIDE.tr.md); Help opens the one for the chosen language.
 - The channel layout is saved on exit and restored on the next launch.
 
+**What the EQ affects**: audio from apps in a channel (including the other people in a voice chat app) goes through that channel's EQ. The Mic channel's EQ only shapes what the mixer plays; other apps still receive your raw microphone.
+
+**Tested platforms**: the Windows build is tested. The macOS and Linux builds compile and pass the automated tests but have not been tried by the repository owner.
+
 Settings live in `%APPDATA%\PocketSoundMixer` on Windows, `~/Library/Application Support/PocketSoundMixer` on macOS, and `~/.config/PocketSoundMixer` on Linux.
 
 ## Build
@@ -34,6 +38,15 @@ sudo apt-get install libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev lib
 ```
 
 To build only the engine and tests (no GUI), add `-DPSM_BUILD_APP=OFF`.
+
+## Releases
+
+Pushing a version tag builds Windows, macOS and Linux and publishes a GitHub Release with the packages attached and notes generated from the merged PRs:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## Architecture
 
@@ -65,3 +78,7 @@ The mixer also moves the app's own output to a spare device you don't listen to,
 1. Our own virtual audio driver, so every channel shows up as a Windows output device (like Sonar or Wave Link) and no spare device is needed.
 2. Per-app capture on macOS (Core Audio process taps, 14.2+) and Linux (PipeWire virtual sinks).
 3. Channel reordering.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
