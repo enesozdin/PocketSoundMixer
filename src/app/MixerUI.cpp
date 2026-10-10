@@ -149,6 +149,7 @@ void MixerUI::applySession(const SessionConfig& session)
     appSilentOutput_ = session.appSilentOutput;
     masterVolumePct_ = gainToPercent(session.masterVolume);
     setTheme(themeFromName(session.theme));
+    language_ = session.language;
 
     for (const ChannelConfig& c : session.channels) {
         Strip* s = addStrip(c.name, c.kind == "mic");
@@ -190,6 +191,7 @@ SessionConfig MixerUI::captureSession() const
     session.appAutoRoute = appAutoRoute_;
     session.appSilentOutput = appSilentOutput_;
     session.theme = themeName(theme_);
+    session.language = language_;
     for (const Strip& s : strips_) {
         const Channel& ch = *s.channel;
         ChannelConfig c;
@@ -333,6 +335,7 @@ void MixerUI::resetChannels()
     fresh.masterVolume = current.masterVolume;
     fresh.outputDevice = current.outputDevice;
     fresh.theme = current.theme;
+    fresh.language = current.language;
     fresh.appAutoRoute = current.appAutoRoute;
     fresh.appSilentOutput = current.appSilentOutput;
     while (!strips_.empty()) {
@@ -539,14 +542,20 @@ void MixerUI::draw(float dt)
 
     ImGui::End();
 
-    if (showPresetManager_) drawPresetManager();
     if (showHelp_) drawHelp();
 }
 
 void MixerUI::drawMasterBar(float dt)
 {
     Mixer& mixer = engine_.mixer();
+    const float rowEnd = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    // Keeps the next piece on this line only if it fits; a narrow window wraps the row instead of clipping it.
+    const auto sameLineIfFits = [&](float nextWidth, float gap) {
+        if (ImGui::GetItemRectMax().x + gap + nextWidth <= rowEnd) ImGui::SameLine(0.0f, gap);
+    };
 
+    ImGui::BeginGroup();
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Master output");
     ImGui::SameLine();
@@ -568,15 +577,16 @@ void MixerUI::drawMasterBar(float dt)
         ImGui::EndCombo();
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Speakers or headphones the mixer plays on");
+    ImGui::EndGroup();
 
-    ImGui::SameLine();
+    sameLineIfFits(200.0f, spacing);
     ImGui::SetNextItemWidth(200.0f);
     // NoInput: a double-click must not turn the fader into a text box.
     if (ImGui::SliderFloat("##master", &masterVolumePct_, 0.0f, 100.0f, "Volume %.0f%%", ImGuiSliderFlags_NoInput)) {
         mixer.masterVolume = percentToGain(masterVolumePct_);
     }
 
-    ImGui::SameLine();
+    sameLineIfFits(240.0f, spacing);
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetFrameHeight();
     for (int side = 0; side < 2; ++side) {
@@ -587,13 +597,16 @@ void MixerUI::drawMasterBar(float dt)
     }
     ImGui::Dummy(ImVec2(240.0f, h));
     if (appCaptureSupported()) {
-        ImGui::SameLine(0.0f, 24.0f);
+        sameLineIfFits(ImGui::CalcTextSize("Spare output").x + spacing + 280.0f, 24.0f);
+        ImGui::BeginGroup();
         drawSpareOutputCombo();
+        ImGui::EndGroup();
     }
 }
 
 void MixerUI::drawToolBar()
 {
+    const float rowEnd = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     if (ImGui::Button("+ Add channel")) {
         if (addStrip("Channel " + std::to_string(strips_.size() + 1), false)) {
             scrollToNewStrip_ = true;
@@ -609,18 +622,8 @@ void MixerUI::drawToolBar()
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Presets")) showPresetManager_ = !showPresetManager_;
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(120.0f);
-    if (ImGui::BeginCombo("##theme", themeName(theme_))) {
-        for (Theme t : {Theme::Dark, Theme::Midnight, Theme::Light}) {
-            if (ImGui::Selectable(themeName(t), t == theme_)) setTheme(t);
-        }
-        ImGui::EndCombo();
-    }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Theme");
-    ImGui::SameLine();
     if (ImGui::Button("Reset channels")) ImGui::OpenPopup("reset");
+    const float leftEnd = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x; // right edge of Reset, in window space
     if (ImGui::BeginPopup("reset")) {
         ImGui::TextUnformatted("Replace all channels with the six default ones?");
         ImGui::TextDisabled("Music, Game, Film, Chat, Podcast and Mic. Your apps go back to normal.");
@@ -632,12 +635,67 @@ void MixerUI::drawToolBar()
         if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Help")) showHelp_ = !showHelp_;
+
+    // Settings and Help sit at the right end of the row.
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float settingsW = ImGui::CalcTextSize("Settings").x + style.FramePadding.x * 2.0f;
+    const float helpW = ImGui::CalcTextSize("Help").x + style.FramePadding.x * 2.0f;
+    const float rightX = rowEnd - settingsW - helpW - style.ItemSpacing.x;
     if (!status_.empty()) {
         ImGui::SameLine();
+        ImGui::PushClipRect(ImGui::GetCursorScreenPos(),
+                            ImVec2(ImGui::GetWindowPos().x + rightX - style.ItemSpacing.x, ImGui::GetCursorScreenPos().y + ImGui::GetFrameHeight()),
+                            true); // a long message never runs under the buttons
+        ImGui::AlignTextToFramePadding();
         ImGui::TextColored(themeColors().errorText, "%s", status_.c_str());
+        ImGui::PopClipRect();
     }
+    // Only reachable below the minimum window size; the buttons then wrap instead of covering Reset.
+    if (rightX >= leftEnd + style.ItemSpacing.x) ImGui::SameLine(rightX);
+    if (ImGui::Button("Settings")) ImGui::OpenPopup("settings");
+    // Anchored under the button's right edge every frame, so it follows the button when the window
+    // is resized and never opens past the window's right side.
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const ImVec2 anchor(std::min(ImGui::GetItemRectMax().x, vp->WorkPos.x + vp->WorkSize.x), ImGui::GetItemRectMax().y + style.ItemSpacing.y);
+    ImGui::SetNextWindowPos(anchor, ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y - anchor.y));
+    if (ImGui::BeginPopup("settings")) {
+        drawSettings();
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Help")) showHelp_ = !showHelp_;
+}
+
+void MixerUI::drawSettings()
+{
+    const float comboW = 180.0f * uiScale_;
+    ImGui::SeparatorText("Appearance");
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Theme");
+    ImGui::SameLine(110.0f * uiScale_);
+    ImGui::SetNextItemWidth(comboW);
+    if (ImGui::BeginCombo("##theme", themeName(theme_))) {
+        for (Theme t : {Theme::Dark, Theme::Midnight, Theme::Light}) {
+            if (ImGui::Selectable(themeName(t), t == theme_)) setTheme(t);
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::SeparatorText("Language");
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Language");
+    ImGui::SameLine(110.0f * uiScale_);
+    ImGui::SetNextItemWidth(comboW);
+    // Only English for now; the setting is saved so translations can plug in later.
+    if (ImGui::BeginCombo("##language", language_ == "en" ? "English" : language_.c_str())) {
+        if (ImGui::Selectable("English", language_ == "en")) language_ = "en";
+        ImGui::BeginDisabled();
+        ImGui::Selectable("More languages coming soon");
+        ImGui::EndDisabled();
+        ImGui::EndCombo();
+    }
+
 }
 
 void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
@@ -921,9 +979,9 @@ void MixerUI::drawHelp()
     ImGui::SeparatorText("Buttons under it");
     item("+ Add channel: a new channel for apps.");
     item("+ Add mic channel: a channel for a microphone.");
-    item("Presets: rename or delete presets, or restore deleted built-in ones.");
-    item("Theme: Dark, Midnight or Light.");
     item("Reset channels: back to Music, Game, Film, Chat, Podcast and Mic.");
+    item("Settings (right): theme (Dark, Midnight or Light) and language.");
+    item("Help (far right): this guide.");
 
     ImGui::SeparatorText("App channels");
     item("\"+ App\" puts apps in a channel. Pick as many as you like, e.g. Spotify and a browser in Music.");
@@ -955,7 +1013,7 @@ void MixerUI::drawHelp()
     item("The curve above the sliders shows the overall shape.");
     item("Pick a preset from the list. A * means you changed it. Save stores your own; pick Flat to undo every change.");
     item("Delete removes the chosen preset, built-in ones too (except Flat). Channels using it keep their sound. "
-         "\"Restore built-in presets\" in the Presets window brings deleted built-ins back.");
+         "\"Restore built-in presets\" at the bottom of the preset list brings deleted built-ins back.");
     ImGui::End();
 }
 
@@ -971,6 +1029,14 @@ void MixerUI::drawPresetRow(Strip& strip)
             if (ImGui::Selectable(p.name.c_str(), p.name == strip.preset && !strip.presetModified)) {
                 applyPreset(strip, p);
             }
+        }
+        if (presets_.hasHiddenBuiltIns()) {
+            ImGui::Separator();
+            if (ImGui::Selectable("Restore built-in presets")) {
+                presets_.restoreBuiltIns();
+                savePresets();
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Brings back the built-in presets you deleted");
         }
         ImGui::EndCombo();
     }
@@ -1059,80 +1125,8 @@ void MixerUI::deletePreset(const std::string& name)
             s.presetModified = false;
         }
     }
-    if (selectedPreset_ == name) selectedPreset_ = "Flat";
     presetError_.clear();
     savePresets();
-}
-
-void MixerUI::drawPresetManager()
-{
-    ImGui::SetNextWindowSize(ImVec2(420, 420), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Presets", &showPresetManager_, ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::End();
-        return;
-    }
-    ImGui::TextDisabled("Save new presets with the Save button on any channel.");
-
-    if (ImGui::BeginListBox("##list", ImVec2(-1.0f, 220.0f))) {
-        for (const Preset& p : presets_.presets()) {
-            const std::string label = p.name + (p.builtIn ? "  (built-in)" : "");
-            if (ImGui::Selectable(label.c_str(), p.name == selectedPreset_)) {
-                selectedPreset_ = p.name;
-                copyToBuf(renameBuf_, p.name);
-                presetError_.clear();
-            }
-        }
-        ImGui::EndListBox();
-    }
-
-    const Preset* sel = presets_.find(selectedPreset_);
-    if (sel) {
-        std::string gains;
-        for (int b = 0; b < kEqBands; ++b) {
-            char buf[24];
-            std::snprintf(buf, sizeof(buf), "%s:%+.0f ", kEqBandLabels[b], sel->gainsDb[b]);
-            gains += buf;
-        }
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("%s", gains.c_str());
-        ImGui::PopTextWrapPos();
-
-        if (sel->builtIn) {
-            ImGui::TextDisabled(presets_.canRemove(sel->name) ? "Built-in presets can't be renamed, but can be deleted."
-                                                              : "Flat can't be deleted: it is the way back to the original sound.");
-            if (presets_.canRemove(sel->name)) {
-                if (ImGui::Button("Delete")) deletePreset(selectedPreset_);
-            }
-        } else {
-            ImGui::SetNextItemWidth(200.0f);
-            ImGui::InputText("##rename", renameBuf_.data(), renameBuf_.size());
-            ImGui::SameLine();
-            if (ImGui::Button("Rename")) {
-                const std::string from = selectedPreset_;
-                const std::string to = renameBuf_.data();
-                if (presets_.rename(from, to, &presetError_)) {
-                    for (Strip& s : strips_) {
-                        if (s.preset == from) s.preset = to;
-                    }
-                    selectedPreset_ = to;
-                    savePresets();
-                }
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Delete")) deletePreset(selectedPreset_);
-        }
-    }
-    if (presets_.hasHiddenBuiltIns()) {
-        ImGui::Separator();
-        if (ImGui::Button("Restore built-in presets")) {
-            presets_.restoreBuiltIns();
-            savePresets();
-        }
-    }
-    if (!presetError_.empty()) {
-        ImGui::TextColored(themeColors().errorText, "%s", presetError_.c_str());
-    }
-    ImGui::End();
 }
 
 } // namespace psm

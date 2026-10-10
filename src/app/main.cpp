@@ -16,6 +16,9 @@
 
 namespace {
 
+constexpr int kMinWindowWidth = 620; // logical pixels
+constexpr int kMinWindowHeight = 480;
+
 void onGlfwError(int code, const char* text)
 {
     std::fprintf(stderr, "GLFW error %d: %s\n", code, text);
@@ -64,6 +67,17 @@ int main()
     if (!window) {
         glfwTerminate();
         return 1;
+    }
+    // Smallest size that still shows the button row on one line and one full channel; the window can't
+    // be shrunk past it. GLFW_SCALE_TO_MONITOR sizes the window in pixels, so scale the limit too.
+    {
+        float minScale = 1.0f;
+        glfwGetWindowContentScale(window, &minScale, nullptr);
+#if defined(__APPLE__)
+        minScale = 1.0f; // macOS sizes windows in points
+#endif
+        glfwSetWindowSizeLimits(window, static_cast<int>(kMinWindowWidth * minScale), static_cast<int>(kMinWindowHeight * minScale),
+                                GLFW_DONT_CARE, GLFW_DONT_CARE);
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // vsync caps redraws at the display rate

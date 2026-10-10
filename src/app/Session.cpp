@@ -49,6 +49,7 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
     s.masterVolume = std::clamp(j.value("master", 1.0f), 0.0f, 1.0f);
     s.outputDevice = j.value("outputDevice", std::string());
     s.theme = j.value("theme", std::string("Dark"));
+    s.language = j.value("language", std::string("en"));
     s.appAutoRoute = j.value("appAutoRoute", true);
     s.appSilentOutput = j.value("appSilentOutput", std::string());
     for (const auto& c : j["channels"]) {
@@ -101,6 +102,7 @@ bool saveSession(const std::filesystem::path& file, const SessionConfig& session
     j["master"] = session.masterVolume;
     j["outputDevice"] = session.outputDevice;
     j["theme"] = session.theme;
+    j["language"] = session.language;
     j["appAutoRoute"] = session.appAutoRoute;
     j["appSilentOutput"] = session.appSilentOutput;
     j["channels"] = nlohmann::json::array();

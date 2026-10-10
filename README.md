@@ -7,10 +7,10 @@ A lightweight desktop sound mixer for Windows, macOS and Linux. You can add or r
 - **Master on top**: pick the speakers or headphones the mixer plays on ("System default" follows Windows), with a master volume and meter.
 - **Dynamic channels**: add or remove up to 64. The first launch starts with Music, Game, Film, Chat, Podcast and a muted Mic channel; **Reset channels** brings these back.
 - **10-band graphic EQ per channel** at 31 Hz to 16 kHz, ±12 dB.
-- **Presets**: 10 built-in ones (Flat, Bass Boost, Treble Boost, Vocal, Loudness, Music, Game, Film, Chat, Podcast) plus as many of your own as you want. Use **Save** on a channel to create one and **Delete** to remove one (built-ins too, except Flat; they can be restored). The **Presets** window renames and restores.
+- **Presets**: 10 built-in ones (Flat, Bass Boost, Treble Boost, Vocal, Loudness, Music, Game, Film, Chat, Podcast) plus as many of your own as you want. Use **Save** on a channel to create one and **Delete** to remove one (built-ins too, except Flat; they can be restored). **Restore built-in presets** at the bottom of the preset list brings deleted built-ins back.
 - **Several apps per channel** on Windows (for example Spotify and YouTube in Chrome both in Music), up to 8. Microphones have their own Mic channel.
 - **Per-channel output**: each channel plays on the Master output ("Automatic") or on a device you pick, e.g. chat on a headset and music on the speakers. Up to 3 extra devices.
-- **Themes**: Dark, Midnight and Light.
+- **Settings**: theme (Dark, Midnight, Light) and a language setting (English for now).
 - Volume in percent (0-100 %), balance, mute, solo and peak meters on each channel. Meters use the broadcast (IEC 60268-18) scale with a peak-hold line, and keep moving on a muted channel.
 - A **Help** window in the app, and a [user guide](docs/USER_GUIDE.md).
 - The channel layout is saved on exit and restored on the next launch.

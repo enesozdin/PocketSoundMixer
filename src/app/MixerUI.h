@@ -14,7 +14,7 @@
 namespace psm {
 
 // Immediate-mode UI for the mixer: the master section on top, one strip per channel below,
-// plus a preset manager and a short help window.
+// plus a settings popup and a short help window.
 // Runs entirely on the UI thread; talks to the audio thread only through Channel/Mixer atomics.
 class MixerUI {
 public:
@@ -85,8 +85,8 @@ private:
     void setTheme(Theme theme);
     void resetChannels();
     void drawPresetRow(Strip& strip);
-    void drawPresetManager();
     void drawHelp();
+    void drawSettings();
 
     AudioEngine& engine_;
     PresetLibrary& presets_;
@@ -102,12 +102,10 @@ private:
     std::string status_;
     float masterVolumePct_ = 100.0f;
     Meter masterMeter_[2];
-    bool showPresetManager_ = false;
     bool showHelp_ = false;
     Theme theme_ = Theme::Dark;
+    std::string language_ = "en";
     float uiScale_ = 1.0f;
-    std::string selectedPreset_ = "Flat";
-    std::array<char, 64> renameBuf_{};
     std::string presetError_;
     int pendingRemove_ = -1;
     bool animating_ = false;
