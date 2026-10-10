@@ -29,6 +29,14 @@ public:
 
     // True while meters are moving, so the main loop keeps redrawing; otherwise it can sleep.
     bool isAnimating() const { return animating_; }
+    // True once after the user finished changing something (a click, a drag, an edit), so the
+    // main loop can save the session right away instead of only on exit.
+    bool takeSessionDirty()
+    {
+        const bool dirty = sessionDirty_;
+        sessionDirty_ = false;
+        return dirty;
+    }
 
     void setStatus(std::string text) { status_ = std::move(text); }
     void setUiScale(float scale) { uiScale_ = scale; }
@@ -121,6 +129,8 @@ private:
     float uiScale_ = 1.0f;
     DeviceVolume* deviceVolume_ = nullptr;
     bool trayEnabled_ = true;
+    bool sessionDirty_ = false;
+    bool wasItemActive_ = false;
     bool startWithWindows_ = true;
     std::function<void(bool)> trayChanged_;
     std::function<void(bool)> autostartChanged_;

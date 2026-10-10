@@ -135,6 +135,7 @@ int main(int argc, char** argv)
     // Tray, autostart and shutdown handling (Windows). Its callbacks run inside glfwWaitEvents*,
     // on this thread, so they can touch the window and UI directly.
     bool quitRequested = false;
+    bool sessionEnded = false; // Windows is shutting down; the session is already saved
     const auto showWindow = [window] {
         glfwShowWindow(window);
         if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) glfwRestoreWindow(window);
@@ -144,8 +145,11 @@ int main(int argc, char** argv)
         showWindow,
         [&quitRequested] { quitRequested = true; },
         [&] {
+            if (sessionEnded) return;
             psm::saveSession(sessionFile, ui.captureSession(), nullptr);
             presets.saveUserPresets(presetFile, nullptr);
+            // Releasing the apps empties the channels, so nothing may save the session after this.
+            sessionEnded = true;
             ui.releaseApps();
             engine.stop();
             quitRequested = true; // in case Windows lets us run on
@@ -207,10 +211,15 @@ int main(int argc, char** argv)
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
+
+        // Save as soon as the user changes something: a shutdown or crash may never reach the end.
+        if (ui.takeSessionDirty()) psm::saveSession(sessionFile, ui.captureSession(), nullptr);
     }
 
-    psm::saveSession(sessionFile, ui.captureSession(), nullptr);
-    presets.saveUserPresets(presetFile, nullptr);
+    if (!sessionEnded) {
+        psm::saveSession(sessionFile, ui.captureSession(), nullptr);
+        presets.saveUserPresets(presetFile, nullptr);
+    }
 
     engine.stop();
     ImGui_ImplOpenGL3_Shutdown();

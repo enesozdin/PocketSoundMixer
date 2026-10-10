@@ -583,6 +583,11 @@ void MixerUI::draw(float dt)
     ImGui::End();
 
     if (showHelp_) drawHelp();
+
+    // Every edit ends with its widget letting go of the active state; one save per edit.
+    const bool itemActive = ImGui::IsAnyItemActive();
+    if (wasItemActive_ && !itemActive) sessionDirty_ = true;
+    wasItemActive_ = itemActive;
 }
 
 void MixerUI::drawMasterBar(float dt)
