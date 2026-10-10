@@ -87,6 +87,7 @@ private:
     void drawPresetRow(Strip& strip);
     void drawPresetManager();
     void drawHelp();
+    void drawSettings();
 
     AudioEngine& engine_;
     PresetLibrary& presets_;
@@ -105,6 +106,7 @@ private:
     bool showPresetManager_ = false;
     bool showHelp_ = false;
     Theme theme_ = Theme::Dark;
+    std::string language_ = "en";
     float uiScale_ = 1.0f;
     std::string selectedPreset_ = "Flat";
     std::array<char, 64> renameBuf_{};

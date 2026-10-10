@@ -149,6 +149,7 @@ void MixerUI::applySession(const SessionConfig& session)
     appSilentOutput_ = session.appSilentOutput;
     masterVolumePct_ = gainToPercent(session.masterVolume);
     setTheme(themeFromName(session.theme));
+    language_ = session.language;
 
     for (const ChannelConfig& c : session.channels) {
         Strip* s = addStrip(c.name, c.kind == "mic");
@@ -190,6 +191,7 @@ SessionConfig MixerUI::captureSession() const
     session.appAutoRoute = appAutoRoute_;
     session.appSilentOutput = appSilentOutput_;
     session.theme = themeName(theme_);
+    session.language = language_;
     for (const Strip& s : strips_) {
         const Channel& ch = *s.channel;
         ChannelConfig c;
@@ -333,6 +335,7 @@ void MixerUI::resetChannels()
     fresh.masterVolume = current.masterVolume;
     fresh.outputDevice = current.outputDevice;
     fresh.theme = current.theme;
+    fresh.language = current.language;
     fresh.appAutoRoute = current.appAutoRoute;
     fresh.appSilentOutput = current.appSilentOutput;
     while (!strips_.empty()) {
@@ -594,6 +597,7 @@ void MixerUI::drawMasterBar(float dt)
 
 void MixerUI::drawToolBar()
 {
+    const float rowEnd = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     if (ImGui::Button("+ Add channel")) {
         if (addStrip("Channel " + std::to_string(strips_.size() + 1), false)) {
             scrollToNewStrip_ = true;
@@ -609,17 +613,6 @@ void MixerUI::drawToolBar()
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Presets")) showPresetManager_ = !showPresetManager_;
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(120.0f);
-    if (ImGui::BeginCombo("##theme", themeName(theme_))) {
-        for (Theme t : {Theme::Dark, Theme::Midnight, Theme::Light}) {
-            if (ImGui::Selectable(themeName(t), t == theme_)) setTheme(t);
-        }
-        ImGui::EndCombo();
-    }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Theme");
-    ImGui::SameLine();
     if (ImGui::Button("Reset channels")) ImGui::OpenPopup("reset");
     if (ImGui::BeginPopup("reset")) {
         ImGui::TextUnformatted("Replace all channels with the six default ones?");
@@ -632,12 +625,67 @@ void MixerUI::drawToolBar()
         if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Help")) showHelp_ = !showHelp_;
+
+    // Settings and Help sit at the right end of the row.
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float settingsW = ImGui::CalcTextSize("Settings").x + style.FramePadding.x * 2.0f;
+    const float helpW = ImGui::CalcTextSize("Help").x + style.FramePadding.x * 2.0f;
+    const float rightX = rowEnd - settingsW - helpW - style.ItemSpacing.x;
     if (!status_.empty()) {
         ImGui::SameLine();
+        ImGui::PushClipRect(ImGui::GetCursorScreenPos(),
+                            ImVec2(ImGui::GetWindowPos().x + rightX - style.ItemSpacing.x, ImGui::GetCursorScreenPos().y + ImGui::GetFrameHeight()),
+                            true); // a long message never runs under the buttons
+        ImGui::AlignTextToFramePadding();
         ImGui::TextColored(themeColors().errorText, "%s", status_.c_str());
+        ImGui::PopClipRect();
     }
+    ImGui::SameLine(std::max(rightX, ImGui::GetCursorPosX()));
+    if (ImGui::Button("Settings")) ImGui::OpenPopup("settings");
+    if (ImGui::BeginPopup("settings")) {
+        drawSettings();
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Help")) showHelp_ = !showHelp_;
+}
+
+void MixerUI::drawSettings()
+{
+    const float comboW = 180.0f * uiScale_;
+    ImGui::SeparatorText("Appearance");
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Theme");
+    ImGui::SameLine(110.0f * uiScale_);
+    ImGui::SetNextItemWidth(comboW);
+    if (ImGui::BeginCombo("##theme", themeName(theme_))) {
+        for (Theme t : {Theme::Dark, Theme::Midnight, Theme::Light}) {
+            if (ImGui::Selectable(themeName(t), t == theme_)) setTheme(t);
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::SeparatorText("Language");
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Language");
+    ImGui::SameLine(110.0f * uiScale_);
+    ImGui::SetNextItemWidth(comboW);
+    // Only English for now; the setting is saved so translations can plug in later.
+    if (ImGui::BeginCombo("##language", language_ == "en" ? "English" : language_.c_str())) {
+        if (ImGui::Selectable("English", language_ == "en")) language_ = "en";
+        ImGui::BeginDisabled();
+        ImGui::Selectable("More languages coming soon");
+        ImGui::EndDisabled();
+        ImGui::EndCombo();
+    }
+
+    ImGui::SeparatorText("Presets");
+    if (ImGui::Button("Manage presets...")) {
+        showPresetManager_ = true;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Rename, delete or restore");
 }
 
 void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
@@ -921,9 +969,9 @@ void MixerUI::drawHelp()
     ImGui::SeparatorText("Buttons under it");
     item("+ Add channel: a new channel for apps.");
     item("+ Add mic channel: a channel for a microphone.");
-    item("Presets: rename or delete presets, or restore deleted built-in ones.");
-    item("Theme: Dark, Midnight or Light.");
     item("Reset channels: back to Music, Game, Film, Chat, Podcast and Mic.");
+    item("Settings (right): theme (Dark, Midnight or Light), language, and Manage presets to rename, delete or restore presets.");
+    item("Help (far right): this guide.");
 
     ImGui::SeparatorText("App channels");
     item("\"+ App\" puts apps in a channel. Pick as many as you like, e.g. Spotify and a browser in Music.");
@@ -955,7 +1003,7 @@ void MixerUI::drawHelp()
     item("The curve above the sliders shows the overall shape.");
     item("Pick a preset from the list. A * means you changed it. Save stores your own; pick Flat to undo every change.");
     item("Delete removes the chosen preset, built-in ones too (except Flat). Channels using it keep their sound. "
-         "\"Restore built-in presets\" in the Presets window brings deleted built-ins back.");
+         "\"Restore built-in presets\" (Settings > Manage presets) brings deleted built-ins back.");
     ImGui::End();
 }
 

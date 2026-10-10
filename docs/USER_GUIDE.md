@@ -18,10 +18,9 @@ To get back to these six channels at any time, click **Reset channels** and conf
 |---|---|
 | **+ Add channel** | Adds a channel for apps. |
 | **+ Add mic channel** | Adds a channel for a microphone (muted at first). |
-| **Presets** | Opens the window where you rename or delete equalizer presets, or restore deleted built-in ones. |
-| Theme list | **Dark**, **Midnight** (a darker, neutral dark theme) or **Light**. The choice is remembered. |
 | **Reset channels** | Replaces all channels with the six default ones. |
-| **Help** | Opens a short guide on the right side of the window. Click it again or the x to close it. |
+| **Settings** (right) | **Theme**: Dark, Midnight (a darker, neutral dark theme) or Light. **Language**: English for now; more languages will be added here. **Manage presets...** opens the window where you rename, delete or restore presets. Your choices are remembered. |
+| **Help** (far right) | Opens a short guide on the right side of the window. Click it again or the x to close it. |
 
 ## The Master row (top)
 
@@ -109,7 +108,7 @@ Some quick recipes:
 - Pick a preset from the list on each channel. A `*` after the name means you changed the sliders since.
 - **Save** stores the current sliders as a preset. Give it a new name, or the name of one of your own presets to update it.
 - **Delete** next to Save deletes the chosen preset after you confirm. Built-in presets can be deleted too, except **Flat**. Channels using a deleted preset keep their current sound.
-- **Presets** (top bar) opens a window where you can rename your own presets, delete any preset except Flat, and bring deleted built-in presets back with **Restore built-in presets**. Built-in presets can't be renamed or edited.
+- **Settings > Manage presets...** opens a window where you can rename your own presets, delete any preset except Flat, and bring deleted built-in presets back with **Restore built-in presets**. Built-in presets can't be renamed or edited.
 
 ## Where settings are saved
 
