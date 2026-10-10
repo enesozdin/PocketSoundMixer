@@ -82,10 +82,14 @@ if(PSM_BUILD_APP)
 
     add_executable(PocketSoundMixer
         src/app/main.cpp
+        src/app/Lang.cpp
         src/app/MixerUI.cpp
         src/app/Session.cpp
         src/app/Theme.cpp)
     target_link_libraries(PocketSoundMixer PRIVATE psm_core imgui)
+    if(MSVC)
+        target_compile_options(PocketSoundMixer PRIVATE /utf-8) # Turkish UI strings are UTF-8 literals
+    endif()
     if(WIN32)
         # GUI app without a console window, but keep the standard main() entry point.
         set_target_properties(PocketSoundMixer PROPERTIES WIN32_EXECUTABLE TRUE)
@@ -98,8 +102,11 @@ endif()
 # ---- Tests ----
 if(PSM_BUILD_TESTS)
     enable_testing()
-    add_executable(psm_core_tests tests/core_tests.cpp src/app/Session.cpp)
+    add_executable(psm_core_tests tests/core_tests.cpp src/app/Session.cpp src/app/Lang.cpp)
     target_include_directories(psm_core_tests PRIVATE src/app)
     target_link_libraries(psm_core_tests PRIVATE psm_core)
+    if(MSVC)
+        target_compile_options(psm_core_tests PRIVATE /utf-8)
+    endif()
     add_test(NAME core COMMAND psm_core_tests)
 endif()

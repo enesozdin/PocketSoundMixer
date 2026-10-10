@@ -19,7 +19,7 @@ To get back to these six channels at any time, click **Reset channels** and conf
 | **+ Add channel** | Adds a channel for apps. |
 | **+ Add mic channel** | Adds a channel for a microphone (muted at first). |
 | **Reset channels** | Replaces all channels with the six default ones. |
-| **Settings** (right) | **Theme**: Dark, Midnight (a darker, neutral dark theme) or Light. **Language**: English for now; more languages will be added here. Your choices are remembered. |
+| **Settings** (right) | **Theme**: Dark, Midnight (near-black with teal), Graphite (black and gray), Violet (black with dark violet) or Light. **Language**: English (default) or Türkçe; the whole mixer switches at once. Your choices are remembered. |
 | **Help** (far right) | Opens a short guide on the right side of the window. Click it again or the x to close it. |
 
 ## The Master row (top)

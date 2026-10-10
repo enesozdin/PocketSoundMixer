@@ -104,7 +104,6 @@ private:
     Meter masterMeter_[2];
     bool showHelp_ = false;
     Theme theme_ = Theme::Dark;
-    std::string language_ = "en";
     float uiScale_ = 1.0f;
     std::string presetError_;
     int pendingRemove_ = -1;
