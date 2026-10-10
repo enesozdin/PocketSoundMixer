@@ -222,7 +222,10 @@ void testPresetLibrary()
     CHECK(!lib.save("Flat", g, &err));      // built-ins are read-only
     CHECK(lib.save("My Preset", g, &err));
     CHECK(lib.rename("My Preset", "Night", &err));
-    CHECK(!lib.remove("Vocal", &err));
+    CHECK(!lib.remove("Flat", &err));       // Flat always stays
+    CHECK(!lib.canRemove("Flat") && lib.canRemove("Vocal"));
+    CHECK(lib.remove("Vocal", &err));       // built-ins can be deleted...
+    CHECK(lib.find("Vocal") == nullptr && lib.hasHiddenBuiltIns());
     CHECK(lib.save("Temp", g, &err));
     CHECK(lib.remove("Temp", &err));
     CHECK(lib.find("Temp") == nullptr);
@@ -234,6 +237,11 @@ void testPresetLibrary()
     CHECK(loaded.find("Night") && !loaded.find("Night")->builtIn);
     CHECK_NEAR(loaded.find("Night")->gainsDb[0], 3.0f, 1e-6f);
     CHECK(loaded.presets().size() == lib.presets().size());
+    CHECK(loaded.find("Vocal") == nullptr);  // ...and stay deleted after a restart
+    loaded.restoreBuiltIns();                // ...until restored, in their original place
+    CHECK(loaded.find("Vocal") && loaded.find("Vocal")->builtIn && !loaded.hasHiddenBuiltIns());
+    CHECK(loaded.presets()[3].name == "Vocal");
+    CHECK(loaded.find("Night") != nullptr);
     std::filesystem::remove(file);
 }
 

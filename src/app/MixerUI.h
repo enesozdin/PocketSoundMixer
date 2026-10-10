@@ -74,6 +74,7 @@ private:
     void applyPreset(Strip& strip, const Preset& preset);
     void updateCurve(Strip& strip);
     void savePresets();
+    void deletePreset(const std::string& name);
 
     void drawMasterBar(float dt);
     void drawToolBar();

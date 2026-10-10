@@ -921,7 +921,7 @@ void MixerUI::drawHelp()
     ImGui::SeparatorText("Buttons under it");
     item("+ Add channel: a new channel for apps.");
     item("+ Add mic channel: a channel for a microphone.");
-    item("Presets: rename or delete your own EQ presets.");
+    item("Presets: rename or delete presets, or restore deleted built-in ones.");
     item("Theme: Dark, Midnight or Light.");
     item("Reset channels: back to Music, Game, Film, Chat, Podcast and Mic.");
 
@@ -954,13 +954,18 @@ void MixerUI::drawHelp()
     item("10 sliders from deep bass (31 Hz, left) to treble (16k, right). Up is louder, down is quieter, the middle is unchanged.");
     item("The curve above the sliders shows the overall shape.");
     item("Pick a preset from the list. A * means you changed it. Save stores your own; pick Flat to undo every change.");
+    item("Delete removes the chosen preset, built-in ones too (except Flat). Channels using it keep their sound. "
+         "\"Restore built-in presets\" in the Presets window brings deleted built-ins back.");
     ImGui::End();
 }
 
 void MixerUI::drawPresetRow(Strip& strip)
 {
     const std::string label = strip.preset + (strip.presetModified ? " *" : "");
-    ImGui::SetNextItemWidth(-60.0f);
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float saveW = ImGui::CalcTextSize("Save").x + style.FramePadding.x * 2.0f;
+    const float delW = ImGui::CalcTextSize("Delete").x + style.FramePadding.x * 2.0f;
+    ImGui::SetNextItemWidth(-(saveW + delW + style.ItemSpacing.x * 2.0f));
     if (ImGui::BeginCombo("##preset", label.c_str())) {
         for (const Preset& p : presets_.presets()) {
             if (ImGui::Selectable(p.name.c_str(), p.name == strip.preset && !strip.presetModified)) {
@@ -970,11 +975,30 @@ void MixerUI::drawPresetRow(Strip& strip)
         ImGui::EndCombo();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Save", ImVec2(-1.0f, 0))) {
+    if (ImGui::Button("Save", ImVec2(saveW, 0))) {
         const Preset* current = presets_.find(strip.preset);
         copyToBuf(strip.presetNameBuf, current && !current->builtIn ? strip.preset : std::string());
         presetError_.clear();
         ImGui::OpenPopup("savepreset");
+    }
+    ImGui::SameLine();
+    const bool deletable = presets_.canRemove(strip.preset);
+    ImGui::BeginDisabled(!deletable);
+    if (ImGui::Button("Delete", ImVec2(delW, 0))) ImGui::OpenPopup("deletepreset");
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip(deletable ? "Delete this preset" : strip.preset == "Flat" ? "Flat can't be deleted" : "Pick a preset to delete it");
+    }
+    if (ImGui::BeginPopup("deletepreset")) {
+        ImGui::Text("Delete the preset \"%s\"?", strip.preset.c_str());
+        ImGui::TextDisabled("Channels using it keep their current sound.");
+        if (ImGui::Button("Delete")) {
+            deletePreset(strip.preset);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
     }
     if (ImGui::BeginPopup("savepreset")) {
         ImGui::TextUnformatted("Save this EQ as a preset:");
@@ -1026,6 +1050,20 @@ void MixerUI::drawEq(Strip& strip)
     ImGui::EndGroup();
 }
 
+void MixerUI::deletePreset(const std::string& name)
+{
+    if (!presets_.remove(name, &presetError_)) return;
+    for (Strip& s : strips_) {
+        if (s.preset == name) { // keep the sound, just drop the link
+            s.preset = "Custom";
+            s.presetModified = false;
+        }
+    }
+    if (selectedPreset_ == name) selectedPreset_ = "Flat";
+    presetError_.clear();
+    savePresets();
+}
+
 void MixerUI::drawPresetManager()
 {
     ImGui::SetNextWindowSize(ImVec2(420, 420), ImGuiCond_FirstUseEver);
@@ -1060,7 +1098,11 @@ void MixerUI::drawPresetManager()
         ImGui::PopTextWrapPos();
 
         if (sel->builtIn) {
-            ImGui::TextDisabled("Built-in presets cannot be renamed or deleted.");
+            ImGui::TextDisabled(presets_.canRemove(sel->name) ? "Built-in presets can't be renamed, but can be deleted."
+                                                              : "Flat can't be deleted: it is the way back to the original sound.");
+            if (presets_.canRemove(sel->name)) {
+                if (ImGui::Button("Delete")) deletePreset(selectedPreset_);
+            }
         } else {
             ImGui::SetNextItemWidth(200.0f);
             ImGui::InputText("##rename", renameBuf_.data(), renameBuf_.size());
@@ -1077,19 +1119,14 @@ void MixerUI::drawPresetManager()
                 }
             }
             ImGui::SameLine();
-            if (ImGui::Button("Delete")) {
-                const std::string name = selectedPreset_;
-                if (presets_.remove(name, &presetError_)) {
-                    for (Strip& s : strips_) {
-                        if (s.preset == name) { // keep the sound, just drop the link
-                            s.preset = "Custom";
-                            s.presetModified = false;
-                        }
-                    }
-                    selectedPreset_ = "Flat";
-                    savePresets();
-                }
-            }
+            if (ImGui::Button("Delete")) deletePreset(selectedPreset_);
+        }
+    }
+    if (presets_.hasHiddenBuiltIns()) {
+        ImGui::Separator();
+        if (ImGui::Button("Restore built-in presets")) {
+            presets_.restoreBuiltIns();
+            savePresets();
         }
     }
     if (!presetError_.empty()) {
