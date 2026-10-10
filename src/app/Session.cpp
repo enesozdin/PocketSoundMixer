@@ -24,7 +24,7 @@ SessionConfig defaultSession()
     ChannelConfig mic;
     mic.name = "Mic";
     mic.kind = "mic";
-    mic.preset = "Vocal";
+    mic.preset = "Clear Voice";
     mic.mute = true;
     mic.sources.push_back({"input", {}, {}});
     s.channels.push_back(mic);

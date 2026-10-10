@@ -214,37 +214,123 @@ void testChannelLimit()
 
 void testPresetLibrary()
 {
+    using psm::PresetKind;
+    constexpr PresetKind kOut = PresetKind::Output;
+    constexpr PresetKind kMic = PresetKind::Mic;
     psm::PresetLibrary lib;
-    CHECK(lib.find("Flat") && lib.find("Flat")->builtIn);
-    CHECK(lib.find("Chat") != nullptr);
+    CHECK(lib.find("Flat", kOut) && lib.find("Flat", kOut)->builtIn);
+    CHECK(lib.find("Flat", kMic) && lib.find("Flat", kMic)->builtIn);
+    CHECK(lib.find("Chat", kOut) != nullptr);
+    // The two lists are separate: no music curves for a mic, no voice curves for apps.
+    CHECK(lib.find("Clear Voice", kMic) && !lib.find("Clear Voice", kOut));
+    CHECK(lib.find("Bass Boost", kOut) && !lib.find("Bass Boost", kMic));
 
     std::string err;
     psm::EqGains g{};
     g[0] = 3.0f;
-    CHECK(!lib.save("Flat", g, &err));      // built-ins are read-only
-    CHECK(lib.save("My Preset", g, &err));
-    CHECK(lib.rename("My Preset", "Night", &err));
-    CHECK(!lib.remove("Flat", &err));       // Flat always stays
-    CHECK(!lib.canRemove("Flat") && lib.canRemove("Vocal"));
-    CHECK(lib.remove("Vocal", &err));       // built-ins can be deleted...
-    CHECK(lib.find("Vocal") == nullptr && lib.hasHiddenBuiltIns());
-    CHECK(lib.save("Temp", g, &err));
-    CHECK(lib.remove("Temp", &err));
-    CHECK(lib.find("Temp") == nullptr);
+    CHECK(!lib.save("Flat", kOut, g, &err));      // built-ins are read-only
+    CHECK(lib.save("My Preset", kOut, g, &err));
+    CHECK(lib.rename("My Preset", "Night", kOut, &err));
+    CHECK(!lib.remove("Flat", kOut, &err));       // Flat always stays
+    CHECK(!lib.canRemove("Flat", kOut) && lib.canRemove("Vocal", kOut));
+    CHECK(lib.remove("Vocal", kOut, &err));       // built-ins can be deleted...
+    CHECK(lib.find("Vocal", kOut) == nullptr && lib.hasHiddenBuiltIns(kOut) && !lib.hasHiddenBuiltIns(kMic));
+    CHECK(lib.save("Temp", kOut, g, &err));
+    CHECK(lib.remove("Temp", kOut, &err));
+    CHECK(lib.find("Temp", kOut) == nullptr);
+    psm::EqGains m{};
+    m[1] = -6.0f;
+    CHECK(lib.save("Night", kMic, m, &err));      // same name, other list: a separate preset
+    CHECK(lib.find("Night", kMic) && lib.find("Night", kOut) && lib.find("Night", kMic) != lib.find("Night", kOut));
+    CHECK(lib.remove("Less Hiss", kMic, &err));
 
     const auto file = std::filesystem::temp_directory_path() / "psm_test_presets.json";
     CHECK(lib.saveUserPresets(file, &err));
     psm::PresetLibrary loaded;
     CHECK(loaded.loadUserPresets(file, &err));
-    CHECK(loaded.find("Night") && !loaded.find("Night")->builtIn);
-    CHECK_NEAR(loaded.find("Night")->gainsDb[0], 3.0f, 1e-6f);
+    CHECK(loaded.find("Night", kOut) && !loaded.find("Night", kOut)->builtIn);
+    CHECK_NEAR(loaded.find("Night", kOut)->gainsDb[0], 3.0f, 1e-6f);
+    CHECK(loaded.find("Night", kMic) && loaded.find("Night", kMic)->kind == kMic);
+    CHECK_NEAR(loaded.find("Night", kMic)->gainsDb[1], -6.0f, 1e-6f);
     CHECK(loaded.presets().size() == lib.presets().size());
-    CHECK(loaded.find("Vocal") == nullptr);  // ...and stay deleted after a restart
-    loaded.restoreBuiltIns();                // ...until restored, in their original place
-    CHECK(loaded.find("Vocal") && loaded.find("Vocal")->builtIn && !loaded.hasHiddenBuiltIns());
+    CHECK(loaded.find("Vocal", kOut) == nullptr);  // ...and stay deleted after a restart
+    CHECK(loaded.find("Less Hiss", kMic) == nullptr);
+    loaded.restoreBuiltIns(kOut);                  // ...until restored, in their original place
+    CHECK(loaded.find("Vocal", kOut) && loaded.find("Vocal", kOut)->builtIn && !loaded.hasHiddenBuiltIns(kOut));
     CHECK(loaded.presets()[3].name == "Vocal");
-    CHECK(loaded.find("Night") != nullptr);
+    CHECK(loaded.find("Less Hiss", kMic) == nullptr && loaded.hasHiddenBuiltIns(kMic)); // the mic list is untouched
+    loaded.restoreBuiltIns(kMic);
+    CHECK(loaded.find("Less Hiss", kMic) && !loaded.hasHiddenBuiltIns(kMic));
+    CHECK(loaded.find("Night", kOut) != nullptr && loaded.find("Night", kMic) != nullptr);
     std::filesystem::remove(file);
+
+    // A preset file from before the mic list: everything in it is an app preset.
+    {
+        std::ofstream out(file);
+        out << R"({"version":1,"hiddenBuiltIns":["Film"],"presets":[{"name":"Old","gains":[1,0,0,0,0,0,0,0,0,0]}]})";
+    }
+    psm::PresetLibrary old;
+    CHECK(old.loadUserPresets(file, &err));
+    CHECK(old.find("Old", kOut) && !old.find("Old", kMic));
+    CHECK(!old.find("Film", kOut) && old.find("Clear Voice", kMic));
+    std::filesystem::remove(file);
+}
+
+// Mono voice-like sine, duplicated to both sides like a mic capture.
+class SineSource final : public psm::AudioSource {
+public:
+    explicit SineSource(float freq) : step_(2.0f * kPi * freq / kRate) {}
+    void read(float* out, uint32_t frames) override
+    {
+        for (uint32_t i = 0; i < frames; ++i) {
+            out[2 * i] = out[2 * i + 1] = 0.1f * std::sin(phase_);
+            phase_ += step_;
+            if (phase_ > 2.0f * kPi) phase_ -= 2.0f * kPi;
+        }
+    }
+    psm::SourceKind kind() const override { return psm::SourceKind::Other; }
+
+private:
+    float step_;
+    float phase_ = 0.0f;
+};
+
+// Plays a tone through a whole mixer channel set to `preset` and returns the change in dB.
+float channelGainDb(const psm::Preset& preset, float freq)
+{
+    psm::Mixer mixer(kRate);
+    psm::Channel* ch = mixer.addChannel("Mic");
+    ch->setGains(preset.gainsDb);
+    mixer.replaceSource(ch, 0, std::make_unique<SineSource>(freq));
+    std::vector<float> out;
+    std::vector<float> block(480 * 2);
+    for (int i = 0; i < 200; ++i) { // 2 s, the first one lets the low bands settle
+        std::fill(block.begin(), block.end(), 0.0f);
+        mixer.process(block.data(), 480);
+        if (i >= 100) out.insert(out.end(), block.begin(), block.end());
+    }
+    const float inDb = 20.0f * std::log10(0.1f / std::sqrt(2.0f));
+    return rmsDb(out, 0) - inDb;
+}
+
+// The mic presets really change the sound that goes through the mixer, the way they promise.
+void testMicPresetsShapeAVoice()
+{
+    psm::PresetLibrary lib;
+    const psm::Preset* flat = lib.find("Flat", psm::PresetKind::Mic);
+    const psm::Preset* clear = lib.find("Clear Voice", psm::PresetKind::Mic);
+    const psm::Preset* rumble = lib.find("Cut Rumble", psm::PresetKind::Mic);
+    const psm::Preset* hiss = lib.find("Less Hiss", psm::PresetKind::Mic);
+    CHECK(flat && clear && rumble && hiss);
+    if (!flat || !clear || !rumble || !hiss) return;
+
+    CHECK_NEAR(channelGainDb(*flat, 1000.0f), 0.0f, 0.1f);
+    CHECK(channelGainDb(*clear, 40.0f) < -10.0f);   // desk thumps and hum
+    CHECK(channelGainDb(*clear, 3000.0f) > 3.0f);   // clarity
+    CHECK(std::fabs(channelGainDb(*rumble, 1000.0f)) < 0.5f); // leaves the voice alone
+    CHECK(channelGainDb(*rumble, 40.0f) < -10.0f);
+    CHECK(channelGainDb(*hiss, 16000.0f) < -8.0f);
+    CHECK(std::fabs(channelGainDb(*hiss, 500.0f)) < 0.5f);
 }
 
 void testSeveralSourcesInOneChannel()
@@ -473,6 +559,7 @@ int main()
     testRemoveIsDeferredUntilAudioThreadMovesOn();
     testChannelLimit();
     testPresetLibrary();
+    testMicPresetsShapeAVoice();
     testRingBuffer();
     testSeveralSourcesInOneChannel();
     testMutedChannelStillMeters();

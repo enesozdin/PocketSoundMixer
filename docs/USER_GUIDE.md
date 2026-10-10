@@ -66,7 +66,7 @@ You choose that device with **Spare output** in the top row, next to the Master 
 The + App window also tells you where the app's own sound goes.
 
 - The spare device is never one you listen on: not the Master output, and not a device a channel plays on.
-- If your PC has only one output device, there is nowhere to move the app, so you will hear it twice. Connect a second output (a monitor with speakers, or a USB headset), or install the free VB-Cable driver.
+- If your PC has only one output device, there is nowhere to move the app, so you will hear it twice. Connect a second output (a monitor with speakers, or a USB headset).
 - If an app ever stays silent after the mixer crashed, open **Spare output** and click **Reset all app outputs**.
 
 ## The Mic channel
@@ -74,6 +74,10 @@ The + App window also tells you where the app's own sound goes.
 Microphones have their own channel, so app channels only hold apps. At the top of the Mic channel, pick **Default microphone**, a specific device, or **None**.
 
 The Mic channel starts muted. Its meter still moves, greyed out, when you talk. Unmute it (the **M** button) to hear yourself, for example to check how you sound with an equalizer preset. Use headphones when you do this, or the speakers will feed back into the mic.
+
+### Mic presets
+
+Mic channels have their own preset list, made for voices: **Flat**, **Clear Voice** (cuts rumble, adds clarity), **Warm Voice**, **Broadcast**, **Cut Rumble** (desk thumps, hum, traffic), **Less Boom** (when you sit very close to the mic) and **Less Hiss**. App channels keep the music, game and film presets. Presets you save on a mic channel appear only on mic channels.
 
 Need a second mic? Click **+ Add mic channel**.
 
@@ -112,6 +116,7 @@ Some quick recipes:
 - Pick a preset from the list on each channel. A `*` after the name means you changed the sliders since.
 - **Save** stores the current sliders as a preset. Give it a new name, or the name of one of your own presets to update it.
 - **Delete** next to Save deletes the chosen preset after you confirm. Built-in presets can be deleted too, except **Flat**. Channels using a deleted preset keep their current sound.
+- App channels and mic channels have separate lists (see [Mic presets](#mic-presets)).
 - After you delete a built-in preset, **Restore built-in presets** appears at the bottom of the preset list and brings them all back. Built-in presets can't be edited.
 
 ## The tray and starting with Windows
