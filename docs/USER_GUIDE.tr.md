@@ -8,6 +8,8 @@ Bu kılavuz, uygulamanın Türkçe arayüzündeki adları kullanır. Dili **Ayar
 
 Uygulama başına kanallar için Windows 11 veya Windows 10 build 20348 ya da daha yenisi gerekir. macOS ve Linux'ta şimdilik yalnızca mikrofon kanalı çalışır.
 
+Test edilen sürüm Windows sürümüdür. macOS ve Linux sürümleri derlenir ve otomatik testlerden geçer, ancak repo sahibi tarafından gerçek bir Mac'te veya Linux bilgisayarda denenmemiştir.
+
 ## İlk açılış
 
 Mikser altı kanalla açılır: **Music**, **Game**, **Film**, **Chat**, **Podcast** ve **Mic**. Her kanalın kendine uygun bir ekolayzır preseti vardır. Kanallar boş başlar, yani sen bir kanala eklemedikçe tüm uygulamaların eskisi gibi çalmaya devam eder.
@@ -82,6 +84,11 @@ Mikrofon kanalı sessizde başlar. Konuştuğunda göstergesi soluk renkte de ol
 Mikrofon kanallarının sesler için hazırlanmış kendi preset listesi vardır: **Flat**, **Clear Voice** (uğultuyu keser, netlik katar), **Warm Voice**, **Broadcast**, **Cut Rumble** (masa darbeleri, vınlama, trafik), **Less Boom** (mikrofona çok yakın oturuyorsan) ve **Less Hiss** (cızırtı). Uygulama kanalları müzik, oyun ve film presetlerini korur. Bir mikrofon kanalında kaydettiğin presetler yalnızca mikrofon kanallarında görünür.
 
 İkinci bir mikrofon mu lazım? **+ Mikrofon kanalı ekle**'ye tıkla.
+
+### Ekolayzır neyi değiştirir
+
+- **Bir kanaldaki uygulamalar**: onlardan duyduğun ses o kanalın ekolayzırından ve ses seviyesinden geçer. Bir sesli sohbet uygulamasını bir kanala eklediğinde karşı taraftakilerin sesi de buna dahildir.
+- **Mikrofonun**: Mikrofon kanalının ekolayzırı yalnızca miksörün çaldığı sesi değiştirir, örneğin kendini duymak için sesini açtığında. Sesli sohbet veya kayıt uygulaması gibi diğer uygulamalar mikrofonunu olduğu gibi, ekolayzırsız alır.
 
 ## Kanal kontrolleri
 

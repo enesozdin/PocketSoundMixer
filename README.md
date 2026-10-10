@@ -15,6 +15,10 @@ A lightweight desktop sound mixer for Windows, macOS and Linux. You can add or r
 - A **Help** window in the app, and a user guide in [English](docs/USER_GUIDE.md) and [Türkçe](docs/USER_GUIDE.tr.md); Help opens the one for the chosen language.
 - The channel layout is saved on exit and restored on the next launch.
 
+**What the EQ affects**: audio from apps in a channel (including the other people in a voice chat app) goes through that channel's EQ. The Mic channel's EQ only shapes what the mixer plays; other apps still receive your raw microphone.
+
+**Tested platforms**: the Windows build is tested. The macOS and Linux builds compile and pass the automated tests but have not been tried by the repository owner.
+
 Settings live in `%APPDATA%\PocketSoundMixer` on Windows, `~/Library/Application Support/PocketSoundMixer` on macOS, and `~/.config/PocketSoundMixer` on Linux.
 
 ## Build
