@@ -23,7 +23,7 @@ You can resize the window freely. It stops at a minimum size that still shows th
 | **+ Add channel** | Adds a channel for apps. |
 | **+ Add mic channel** | Adds a channel for a microphone (muted at first). |
 | **Reset channels** | Replaces all channels with the six default ones. |
-| **Settings** (right) | **Theme**: Dark, Midnight (near-black with teal), Graphite (black and gray), Violet (black with dark violet) or Light. **Language**: English (default) or Türkçe; the whole mixer switches at once. Your choices are remembered. |
+| **Settings** (right) | **Theme**: Dark, Midnight (near-black with teal), Graphite (black and gray), Violet (black with dark violet) or Light. **Language**: English (default) or Türkçe; the whole mixer switches at once. **Windows** (Windows only): *Keep running in the system tray when closed* and *Start with Windows*, both on at first; see [The tray and starting with Windows](#the-tray-and-starting-with-windows). Your choices are remembered. |
 | **Help** (far right) | Opens a short guide on the right side of the window, in the language you chose. **Open the full user guide** at its top opens this guide in your browser, in that language too. Click Help again or the x to close it. |
 
 ## The Master row (top)
@@ -113,6 +113,15 @@ Some quick recipes:
 - **Save** stores the current sliders as a preset. Give it a new name, or the name of one of your own presets to update it.
 - **Delete** next to Save deletes the chosen preset after you confirm. Built-in presets can be deleted too, except **Flat**. Channels using a deleted preset keep their current sound.
 - After you delete a built-in preset, **Restore built-in presets** appears at the bottom of the preset list and brings them all back. Built-in presets can't be edited.
+
+## The tray and starting with Windows
+
+On Windows the mixer lives in the system tray (the icons next to the clock), so your channels keep working when the window is closed. Both settings are in **Settings > Windows** and are on at first.
+
+- **Keep running in the system tray when closed**: closing the window only hides it; the sound keeps going through your channels. Click the tray icon to open the window again. Right-click it and choose **Quit** to really close the mixer; your apps then go back to normal. Turn this off to make closing the window quit the mixer.
+- **Start with Windows**: the mixer starts in the tray when you sign in, without opening its window.
+- Only one copy runs at a time. Starting it again (for example from the Start menu) opens the window of the copy that is already running.
+- When Windows shuts down, the mixer saves your settings and puts your apps back on their normal outputs first.
 
 ## Where settings are saved
 

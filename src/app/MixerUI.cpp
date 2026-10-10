@@ -174,6 +174,8 @@ void MixerUI::applySession(const SessionConfig& session)
     masterVolumePct_ = gainToPercent(session.masterVolume);
     setTheme(themeFromName(session.theme));
     setLanguage(languageFromCode(session.language));
+    trayEnabled_ = session.trayEnabled;
+    startWithWindows_ = session.startWithWindows;
     attachDeviceVolume();
 
     for (const ChannelConfig& c : session.channels) {
@@ -217,6 +219,8 @@ SessionConfig MixerUI::captureSession() const
     session.appSilentOutput = appSilentOutput_;
     session.theme = themeName(theme_);
     session.language = languageCode(currentLanguage());
+    session.trayEnabled = trayEnabled_;
+    session.startWithWindows = startWithWindows_;
     for (const Strip& s : strips_) {
         const Channel& ch = *s.channel;
         ChannelConfig c;
@@ -361,6 +365,8 @@ void MixerUI::resetChannels()
     fresh.outputDevice = current.outputDevice;
     fresh.theme = current.theme;
     fresh.language = current.language;
+    fresh.trayEnabled = current.trayEnabled;
+    fresh.startWithWindows = current.startWithWindows;
     fresh.appAutoRoute = current.appAutoRoute;
     fresh.appSilentOutput = current.appSilentOutput;
     while (!strips_.empty()) {
@@ -577,6 +583,11 @@ void MixerUI::draw(float dt)
     ImGui::End();
 
     if (showHelp_) drawHelp();
+
+    // Every edit ends with its widget letting go of the active state; one save per edit.
+    const bool itemActive = ImGui::IsAnyItemActive();
+    if (wasItemActive_ && !itemActive) sessionDirty_ = true;
+    wasItemActive_ = itemActive;
 }
 
 void MixerUI::drawMasterBar(float dt)
@@ -741,6 +752,21 @@ void MixerUI::drawSettings()
         }
         ImGui::EndCombo();
     }
+
+    if (trayChanged_ && autostartChanged_) {
+        ImGui::SeparatorText(tr(S::SystemSection));
+        if (ImGui::Checkbox(tr(S::TrayOption), &trayEnabled_)) trayChanged_(trayEnabled_);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tr(S::TrayOptionTip));
+        if (ImGui::Checkbox(tr(S::AutostartOption), &startWithWindows_)) autostartChanged_(startWithWindows_);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tr(S::AutostartOptionTip));
+    }
+}
+
+void MixerUI::releaseApps()
+{
+    // Every app capture puts its app's output back when destroyed; wait until that has happened.
+    for (Strip& s : strips_) engine_.mixer().clearSources(s.channel);
+    engine_.mixer().flushGarbage(500);
 }
 
 void MixerUI::drawStrip(Strip& strip, size_t index, float dt)

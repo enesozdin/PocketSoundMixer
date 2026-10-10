@@ -52,6 +52,8 @@ bool loadSession(const std::filesystem::path& file, SessionConfig& out, std::str
     s.language = j.value("language", std::string("en"));
     s.appAutoRoute = j.value("appAutoRoute", true);
     s.appSilentOutput = j.value("appSilentOutput", std::string());
+    s.trayEnabled = j.value("trayEnabled", true);
+    s.startWithWindows = j.value("startWithWindows", true);
     for (const auto& c : j["channels"]) {
         if (!c.is_object()) continue;
         ChannelConfig cc;
@@ -105,6 +107,8 @@ bool saveSession(const std::filesystem::path& file, const SessionConfig& session
     j["language"] = session.language;
     j["appAutoRoute"] = session.appAutoRoute;
     j["appSilentOutput"] = session.appSilentOutput;
+    j["trayEnabled"] = session.trayEnabled;
+    j["startWithWindows"] = session.startWithWindows;
     j["channels"] = nlohmann::json::array();
     for (const ChannelConfig& c : session.channels) {
         nlohmann::json sources = nlohmann::json::array();

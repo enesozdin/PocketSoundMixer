@@ -9,6 +9,7 @@
 
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -28,11 +29,28 @@ public:
 
     // True while meters are moving, so the main loop keeps redrawing; otherwise it can sleep.
     bool isAnimating() const { return animating_; }
+    // True once after the user finished changing something (a click, a drag, an edit), so the
+    // main loop can save the session right away instead of only on exit.
+    bool takeSessionDirty()
+    {
+        const bool dirty = sessionDirty_;
+        sessionDirty_ = false;
+        return dirty;
+    }
 
     void setStatus(std::string text) { status_ = std::move(text); }
     void setUiScale(float scale) { uiScale_ = scale; }
     // Windows volume of the Master output device, mirrored by the Master volume slider.
     void setDeviceVolume(DeviceVolume* volume) { deviceVolume_ = volume; }
+    // Windows tray and autostart settings; called when the user flips them in Settings.
+    void setSystemHooks(std::function<void(bool)> trayChanged, std::function<void(bool)> autostartChanged)
+    {
+        trayChanged_ = std::move(trayChanged);
+        autostartChanged_ = std::move(autostartChanged);
+    }
+    bool trayEnabled() const { return trayEnabled_; }
+    // Ends every app capture now, so apps are back on their own outputs (Windows shutdown).
+    void releaseApps();
 
 private:
     static constexpr int kCurvePoints = 64;
@@ -110,6 +128,12 @@ private:
     Theme theme_ = Theme::Dark;
     float uiScale_ = 1.0f;
     DeviceVolume* deviceVolume_ = nullptr;
+    bool trayEnabled_ = true;
+    bool sessionDirty_ = false;
+    bool wasItemActive_ = false;
+    bool startWithWindows_ = true;
+    std::function<void(bool)> trayChanged_;
+    std::function<void(bool)> autostartChanged_;
     std::string presetError_;
     int pendingRemove_ = -1;
     bool animating_ = false;

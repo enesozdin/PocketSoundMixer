@@ -83,10 +83,12 @@ if(PSM_BUILD_APP)
 
     add_executable(PocketSoundMixer
         src/app/main.cpp
+        src/app/AppIcon.cpp
         src/app/Lang.cpp
         src/app/MixerUI.cpp
         src/app/OpenUrl.cpp
         src/app/Session.cpp
+        src/app/SystemTray.cpp
         src/app/Theme.cpp)
     target_link_libraries(PocketSoundMixer PRIVATE psm_core imgui)
     if(MSVC)
