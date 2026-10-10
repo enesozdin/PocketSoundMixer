@@ -2,6 +2,7 @@
 
 #include "AppCapture.h"
 #include "AudioEngine.h"
+#include "DeviceVolume.h"
 #include "Presets.h"
 #include "Session.h"
 #include "Theme.h"
@@ -30,6 +31,8 @@ public:
 
     void setStatus(std::string text) { status_ = std::move(text); }
     void setUiScale(float scale) { uiScale_ = scale; }
+    // Windows volume of the Master output device, mirrored by the Master volume slider.
+    void setDeviceVolume(DeviceVolume* volume) { deviceVolume_ = volume; }
 
 private:
     static constexpr int kCurvePoints = 64;
@@ -65,6 +68,7 @@ private:
     std::string silentOutputId();
     void reopenAppChannels();
     void selectOutput(const std::string& name);
+    void attachDeviceVolume();
     void applyChannelOutput(Strip& strip);
     void closeUnusedOutputs();
     std::vector<std::string> outputsInUse() const;
@@ -105,6 +109,7 @@ private:
     bool showHelp_ = false;
     Theme theme_ = Theme::Dark;
     float uiScale_ = 1.0f;
+    DeviceVolume* deviceVolume_ = nullptr;
     std::string presetError_;
     int pendingRemove_ = -1;
     bool animating_ = false;

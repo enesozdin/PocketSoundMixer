@@ -33,7 +33,7 @@ Pencereyi istediğin gibi boyutlandırabilirsin. Pencere, buton satırını ve b
 | Kontrol | Ne yapar |
 |---|---|
 | Ana çıkış | Mikserin çaldığı yer. **Sistem varsayılanı** Windows'taki varsayılan cihazı izler, yani orada cihaz değiştirdiğinde o da değişir. Belirli bir kulaklık veya hoparlör de seçebilirsin. Seçim hatırlanır. |
-| Ses | Tüm karışımı açar veya kısar. |
+| Ses | Tüm karışımı açar veya kısar. Windows'ta bu, ana çıkış cihazının kendi Windows ses düzeyidir; bu yüzden görev çubuğundaki sürgüyle hep aynıdır ve kulaklığının ses tuşlarına bastığında o da değişir. Cihaz Windows'ta sessize alınmışsa *(sessiz)* yazar. |
 | Gösterge | Her şeyin birlikte ne kadar yüksek olduğunu gösterir. Üstteki çubuk sol, alttaki çubuk sağ taraftır. |
 | Yedek çıkış (Windows) | Kanaldaki uygulamaların kendi sesinin taşındığı yer; böylece onları yalnızca mikserden duyarsın. Bkz. [Bir uygulamayı yalnızca bir kez duymak](#bir-uygulamayı-yalnızca-bir-kez-duymak). |
 
@@ -43,7 +43,7 @@ Kayıtlı cihaz çıkarılmışsa mikser onun yerine sistem varsayılanında ça
 
 1. Uygulamada bir şey çalmaya başla, örneğin Spotify'da bir şarkı.
 2. İstediğin kanalda **+ Uygulama**'ya tıkla, örneğin Music.
-3. Listeden uygulamayı seç. Pencere açık kalır, böylece aynı kanala başka uygulamalar da seçebilirsin.
+3. Uygulamanın önündeki kutucuğu işaretle. Pencere açık kalır, böylece aynı kanala başka uygulamaları da işaretleyebilirsin. Bir uygulamayı tekrar çıkarmak için işaretini kaldır.
 
 Kanallardaki uygulamalar hakkında bilmen gerekenler:
 
