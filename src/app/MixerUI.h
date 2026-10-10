@@ -69,7 +69,8 @@ private:
     void closeUnusedOutputs();
     std::vector<std::string> outputsInUse() const;
     void drawOutputRow(Strip& strip);
-    void drawAppRoutingSettings();
+    void drawSpareOutputCombo();
+    std::string spareOutputName();
     void applyPreset(Strip& strip, const Preset& preset);
     void updateCurve(Strip& strip);
     void savePresets();

@@ -30,6 +30,7 @@ To get back to these six channels at any time, click **Reset channels** and conf
 | Master output | Where the mixer plays. **System default** follows the default device in Windows, so it changes when you switch devices there. You can also pick specific headphones or speakers. The choice is remembered. |
 | Volume | Turns the whole mix up or down. |
 | Meter | Shows how loud everything together is. The top bar is the left side and the bottom bar is the right side. |
+| Spare output (Windows) | Where apps in a channel have their own sound moved, so you hear them only through the mixer. See [Hearing an app only once](#hearing-an-app-only-once). |
 
 If the saved device is unplugged, the mixer plays on the system default instead.
 
@@ -50,11 +51,20 @@ Some things to know about apps in channels:
 
 ### Hearing an app only once
 
-The mixer has to capture the app's sound. If the app also kept playing on your speakers, you would hear it twice. So by default (**Hear apps only through the mixer**, in the + App popup) the mixer moves the app's own output to a *spare* device you don't listen to, such as monitor/HDMI audio. The app goes back to normal when you take it out of the channel or close the mixer.
+The mixer has to capture the app's sound. If the app also kept playing on your speakers, you would hear it twice. So the mixer moves the app's own output to a *spare* device you don't listen to, such as monitor/HDMI audio. The app goes back to normal when you take it out of the channel or close the mixer.
+
+You choose that device with **Spare output** in the top row, next to the Master output:
+
+- **Automatic** (the default) picks the first device you don't listen on. The list shows which one it picked.
+- Pick a device to always use that one.
+- **Off** leaves apps alone, so they also play directly and you may hear them twice.
+- **Reset all app outputs** puts every app back on your normal output.
+
+The + App window also tells you where the app's own sound goes.
 
 - The spare device is never one you listen on: not the Master output, and not a device a channel plays on.
 - If your PC has only one output device, there is nowhere to move the app, so you will hear it twice. Connect a second output (a monitor with speakers, or a USB headset), or install the free VB-Cable driver.
-- If an app ever stays silent after the mixer crashed, open the + App popup and click **Reset all app outputs**.
+- If an app ever stays silent after the mixer crashed, open **Spare output** and click **Reset all app outputs**.
 
 ## The Mic channel
 
@@ -117,7 +127,7 @@ To start fresh, close the mixer and delete `session.json` from that folder.
 | Problem | What to do |
 |---|---|
 | I hear an app twice | There is no spare output device. See [Hearing an app only once](#hearing-an-app-only-once). |
-| An app is silent after the mixer crashed | Open + App and click **Reset all app outputs**. |
+| An app is silent after the mixer crashed | Open **Spare output** and click **Reset all app outputs**. |
 | The app isn't in the + App list | Play something in it first, or type its program name. |
 | Nothing plays at all | Check the Master output and volume, then check that the channel isn't muted, and that no other channel is soloed. |
 | The meter is red | Turn down that channel, or lower the equalizer sliders you raised. |

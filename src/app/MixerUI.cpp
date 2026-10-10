@@ -396,58 +396,72 @@ void MixerUI::selectOutput(const std::string& name)
     reopenAppChannels();
 }
 
-void MixerUI::drawAppRoutingSettings()
+std::string MixerUI::spareOutputName()
 {
-    if (ImGui::Checkbox("Hear apps only through the mixer", &appAutoRoute_)) {
-        reopenAppChannels();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Moves the app's own sound to a spare output while it is in a channel,\n"
-                          "so you don't hear it twice. Put back when you remove it from the channel.");
-    }
-    if (!appAutoRoute_) {
-        if (ImGui::Button("Open Windows sound settings")) openAppVolumeSettings();
-        return;
-    }
-    const std::string current = silentOutputId();
-    if (current.empty()) {
-        ImGui::PushTextWrapPos(380.0f);
-        ImGui::TextColored(themeColors().warningText,
-                           "No spare output device, so captured apps also play directly. "
-                           "Connect a second output (a monitor with audio, a USB headset) or install the free VB-Cable driver.");
-        ImGui::PopTextWrapPos();
-        return;
-    }
-    std::string currentName;
+    const std::string id = silentOutputId();
     for (const OutputDeviceInfo& d : outputDevices_) {
-        if (d.id == current) currentName = d.name;
+        if (d.id == id) return d.name;
     }
-    ImGui::TextDisabled("Spare output for app sound:");
-    ImGui::SetNextItemWidth(320.0f);
-    const std::string label = appSilentOutput_.empty() ? "Automatic (" + currentName + ")" : currentName;
-    if (ImGui::BeginCombo("##silent", label.c_str())) {
-        if (ImGui::Selectable("Automatic", appSilentOutput_.empty())) {
+    return {};
+}
+
+void MixerUI::drawSpareOutputCombo()
+{
+    // Captured apps' own sound is moved ("parked") here, so you hear them only through the mixer.
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Spare output");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Apps in a channel have their own sound moved to this device, so you\n"
+                          "hear them only once, through the mixer. Pick a device you don't listen to,\n"
+                          "e.g. monitor/HDMI audio. Apps go back to normal when removed from a channel.");
+    }
+    ImGui::SameLine();
+    const std::string spare = spareOutputName();
+    std::string label;
+    if (!appAutoRoute_) label = "Off (apps also play directly)";
+    else if (spare.empty()) label = "None available (apps also play directly)";
+    else if (!appSilentOutput_.empty() && spare == appSilentOutput_) label = spare;
+    else label = "Automatic (" + spare + ")";
+
+    ImGui::SetNextItemWidth(280.0f);
+    if (ImGui::BeginCombo("##spare", label.c_str())) {
+        if (ImGui::IsWindowAppearing()) outputDevices_ = listOutputDevices();
+        const std::vector<std::string> inUse = outputsInUse();
+        if (ImGui::Selectable("Automatic", appAutoRoute_ && appSilentOutput_.empty())) {
+            appAutoRoute_ = true;
             appSilentOutput_.clear();
             reopenAppChannels();
         }
+        int offered = 0;
         for (const OutputDeviceInfo& d : outputDevices_) {
-            if (d.isDefault || d.name == engine_.outputDeviceName()) continue; // you listen there
-            bool used = false;
-            for (const Strip& s : strips_) used |= s.outputDevice == d.name;
-            if (used) continue;
-            if (ImGui::Selectable(d.name.c_str(), d.name == appSilentOutput_)) {
+            if (d.isDefault || std::find(inUse.begin(), inUse.end(), d.name) != inUse.end()) continue; // you listen there
+            ++offered;
+            if (ImGui::Selectable(d.name.c_str(), appAutoRoute_ && d.name == appSilentOutput_)) {
+                appAutoRoute_ = true;
                 appSilentOutput_ = d.name;
                 reopenAppChannels();
             }
         }
+        if (offered == 0) {
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 320.0f);
+            ImGui::TextColored(themeColors().warningText,
+                               "No spare device: every output is one you listen on. Connect a second output "
+                               "(a monitor with audio, a USB headset) or install the free VB-Cable driver.");
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::Separator();
+        if (ImGui::Selectable("Off (apps also play directly)", !appAutoRoute_)) {
+            appAutoRoute_ = false;
+            reopenAppChannels();
+        }
+        if (ImGui::Selectable("Reset all app outputs")) {
+            resetAllAppOutputs();
+            reopenAppChannels();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Puts every app back on your normal output, like Windows' own Reset button.");
+        }
         ImGui::EndCombo();
-    }
-    if (ImGui::SmallButton("Reset all app outputs")) {
-        resetAllAppOutputs();
-        reopenAppChannels();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Puts every app back on your normal output, like Windows' own Reset button.");
     }
 }
 
@@ -572,8 +586,10 @@ void MixerUI::drawMasterBar(float dt)
         drawMeterBar(ImGui::GetWindowDrawList(), ImVec2(p.x, y0 + 1), ImVec2(p.x + 240.0f, y0 + h * 0.5f - 1), m.db, m.holdDb, false, false);
     }
     ImGui::Dummy(ImVec2(240.0f, h));
-    ImGui::SameLine();
-    ImGui::TextDisabled("%u Hz", engine_.sampleRate());
+    if (appCaptureSupported()) {
+        ImGui::SameLine(0.0f, 24.0f);
+        drawSpareOutputCombo();
+    }
 }
 
 void MixerUI::drawToolBar()
@@ -796,7 +812,16 @@ void MixerUI::drawAppSources(Strip& strip)
             appExeBuf_[0] = '\0';
         }
         ImGui::Separator();
-        drawAppRoutingSettings();
+        const std::string spare = appAutoRoute_ ? spareOutputName() : std::string();
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 380.0f);
+        if (spare.empty()) {
+            ImGui::TextColored(themeColors().warningText, "The app's own sound also keeps playing, so you may hear it twice. "
+                                                          "Set \"Spare output\" at the top.");
+        } else {
+            ImGui::TextDisabled("The app's own sound is moved to \"%s\", so you hear it only through the mixer. "
+                                "Change it with \"Spare output\" at the top.", spare.c_str());
+        }
+        ImGui::PopTextWrapPos();
         ImGui::EndPopup();
     }
 }
@@ -906,9 +931,9 @@ void MixerUI::drawHelp()
     item("A closed app shows \"waiting for it to start\" and joins by itself when it starts.");
     item("The small x next to an app takes it out of the channel. Clear all empties the channel.");
     item("Apps you never put in a channel play normally, as if the mixer wasn't there.");
-    item("\"Hear apps only through the mixer\" (in the + App window) moves each app's own sound to a spare output, "
-         "so you don't hear it twice. With only one output device you will hear it twice. "
-         "\"Reset all app outputs\" puts every app back to normal.");
+    item("Spare output (top row): apps in a channel have their own sound moved to this device, so you hear them "
+         "only once, through the mixer. Pick a device you don't listen to, e.g. monitor/HDMI audio. "
+         "\"Off\" leaves apps alone (you may hear them twice). \"Reset all app outputs\" puts every app back to normal.");
 
     ImGui::SeparatorText("Mic channel");
     item("Choose your microphone in the list at the top of the channel.");
