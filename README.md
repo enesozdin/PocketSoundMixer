@@ -35,6 +35,15 @@ sudo apt-get install libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev lib
 
 To build only the engine and tests (no GUI), add `-DPSM_BUILD_APP=OFF`.
 
+## Releases
+
+Pushing a version tag builds Windows, macOS and Linux and publishes a GitHub Release with the packages attached and notes generated from the merged PRs:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ## Architecture
 
 ```
