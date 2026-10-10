@@ -496,12 +496,9 @@ void MixerUI::drawMasterBar(float dt)
 
     ImGui::SameLine();
     ImGui::SetNextItemWidth(200.0f);
-    if (ImGui::SliderFloat("##master", &masterVolumePct_, 0.0f, 100.0f, "Volume %.0f%%")) {
+    // NoInput: a double-click must not turn the fader into a text box.
+    if (ImGui::SliderFloat("##master", &masterVolumePct_, 0.0f, 100.0f, "Volume %.0f%%", ImGuiSliderFlags_NoInput)) {
         mixer.masterVolume = percentToGain(masterVolumePct_);
-    }
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        masterVolumePct_ = 100.0f;
-        mixer.masterVolume = 1.0f;
     }
 
     ImGui::SameLine();
@@ -573,15 +570,11 @@ void MixerUI::drawStrip(Strip& strip, size_t index, float dt)
     // Volume fader + meters on the right of the EQ.
     ImGui::SameLine();
     ImGui::BeginGroup();
-    if (ImGui::VSliderFloat("##vol", ImVec2(30.0f, kSliderHeight), &strip.volumePct, 0.0f, 100.0f, "")) {
+    if (ImGui::VSliderFloat("##vol", ImVec2(30.0f, kSliderHeight), &strip.volumePct, 0.0f, 100.0f, "", ImGuiSliderFlags_NoInput)) {
         ch.volume = percentToGain(strip.volumePct);
     }
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        strip.volumePct = 100.0f;
-        ch.volume = 1.0f;
-    }
     if (ImGui::IsItemActive() || ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Volume %.0f%%  (double-click: 100%%)", strip.volumePct);
+        ImGui::SetTooltip("Volume %.0f%%", strip.volumePct);
     }
     ImGui::Text("%3.0f%%", strip.volumePct);
     ImGui::EndGroup();
@@ -739,28 +732,32 @@ void MixerUI::drawSources(Strip& strip)
 
 void MixerUI::drawHelp()
 {
-    ImGui::SetNextWindowSize(ImVec2(520, 440), ImGuiCond_FirstUseEver);
+    // BulletText never wraps in Dear ImGui, so long lines ran off the window.
+    const auto helpBullet = [](const char* text) {
+        ImGui::Bullet();
+        ImGui::TextWrapped("%s", text);
+    };
+    ImGui::SetNextWindowSize(ImVec2(560, 520), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowBgAlpha(1.0f); // the strips behind must not show through the text
     if (!ImGui::Begin("Help", &showHelp_, ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::End();
         return;
     }
-    ImGui::PushTextWrapPos(0.0f);
     ImGui::SeparatorText("Master (top row)");
-    ImGui::BulletText("Pick where you listen: \"System default\" follows Windows; or choose your headphones or speakers.");
-    ImGui::BulletText("Volume changes everything at once. The bar next to it shows how loud the whole mix is.");
+    helpBullet("Pick where you listen: \"System default\" follows Windows; or choose your headphones or speakers.");
+    helpBullet("Volume changes everything at once. The bar next to it shows how loud the whole mix is.");
     ImGui::SeparatorText("Channels");
-    ImGui::BulletText("Each channel is a group, like Music or Game. \"+ App\" puts apps in it; you can add several.");
-    ImGui::BulletText("An app that isn't running yet is waiting; it joins by itself when it starts.");
-    ImGui::BulletText("\"+ Mic\" adds a microphone. The Mic channel starts muted so you don't hear yourself; its bar still moves when you talk.");
-    ImGui::BulletText("Apps you never put in a channel keep playing normally on your Windows default output.");
+    helpBullet("Each channel is a group, like Music or Game. \"+ App\" puts apps in it; you can add several.");
+    helpBullet("An app that isn't running yet is waiting; it joins by itself when it starts.");
+    helpBullet("\"+ Mic\" adds a microphone. The Mic channel starts muted so you don't hear yourself; its bar still moves when you talk.");
+    helpBullet("Apps you never put in a channel keep playing normally on your Windows default output.");
     ImGui::SeparatorText("Volume and meters");
-    ImGui::BulletText("Volume is 0-100%%. Double-click a fader to reset it to 100%%.");
-    ImGui::BulletText("Meters: green is normal, yellow is loud, red means it is at the limit; turn something down.");
-    ImGui::BulletText("M mutes a channel. S (solo) plays only the soloed channels.");
+    helpBullet("Volume is 0-100%. Drag a fader up or down.");
+    helpBullet("Meters: green is normal, yellow is loud, red means it is at the limit; turn something down.");
+    helpBullet("M mutes a channel. S (solo) plays only the soloed channels.");
     ImGui::SeparatorText("Equalizer");
-    ImGui::BulletText("The 10 sliders change bass (left) to treble (right). Up is louder, down is quieter, middle is unchanged.");
-    ImGui::BulletText("Pick a preset from the list, or shape your own and press Save. Double-click a slider to reset it.");
-    ImGui::PopTextWrapPos();
+    helpBullet("The 10 sliders change bass (left) to treble (right). Up is louder, down is quieter, middle is unchanged.");
+    helpBullet("Pick a preset from the list, or shape your own and press Save. Double-click a slider to reset it.");
     ImGui::End();
 }
 
@@ -814,7 +811,7 @@ void MixerUI::drawEq(Strip& strip)
         if (b > 0) ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::PushID(b);
-        if (ImGui::VSliderFloat("##band", ImVec2(kBandWidth, kSliderHeight), &gains[b], kEqMinGainDb, kEqMaxGainDb, "")) {
+        if (ImGui::VSliderFloat("##band", ImVec2(kBandWidth, kSliderHeight), &gains[b], kEqMinGainDb, kEqMaxGainDb, "", ImGuiSliderFlags_NoInput)) {
             ch.setGain(b, gains[b]);
             strip.presetModified = true;
             strip.curveDirty = true;

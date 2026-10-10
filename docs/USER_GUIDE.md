@@ -15,7 +15,7 @@ The Mic channel holds your default microphone and starts muted, so you don't hea
 | Control | What it does |
 |---|---|
 | Output list | Where the mixer plays. **System default** follows the default device in Windows, so it changes when you switch devices there. You can also pick specific headphones or speakers. The choice is remembered. |
-| Volume | Turns the whole mix up or down. Double-click it to go back to 100 %. |
+| Volume | Turns the whole mix up or down. |
 | Meter | Shows how loud everything together is. The top bar is the left side and the bottom bar is the right side. |
 
 If the saved device is unplugged, the mixer plays on the system default instead.
@@ -53,7 +53,7 @@ Click **+ Mic** on any channel and pick **Default microphone** or a specific dev
 |---|---|
 | Name | Click it to rename the channel. |
 | **x** (top right) | Removes the channel. |
-| Volume fader | 0 % to 100 %. It changes loudness in steps your ear hears as even: 50 % is clearly quieter, and 10 % is barely audible. Double-click it to go back to 100 %. |
+| Volume fader | 0 % to 100 %. It changes loudness in steps your ear hears as even: 50 % is clearly quieter, and 10 % is barely audible. |
 | Meter | Green is normal, yellow is loud, and red means the sound is at the limit, so turn something down. The thin line shows the latest peak for a moment. On a muted channel the meter is greyed out but still moves. |
 | Balance | Moves the sound to the left or right. Double-click it to center it. |
 | **M** | Mute. |
