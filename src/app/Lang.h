@@ -57,6 +57,16 @@ enum class Language : std::uint8_t { English, Turkish, Count };
     X(Appearance, "Appearance", "Görünüm") \
     X(ThemeLabel, "Theme", "Tema") \
     X(LanguageLabel, "Language", "Dil") \
+    X(SystemSection, "Windows", "Windows") \
+    X(TrayOption, "Keep running in the system tray when closed", "Kapatınca sistem tepsisinde çalışmaya devam et") \
+    X(TrayOptionTip, \
+      "Closing the window hides it; the mix keeps playing. Click the tray icon to open it, right-click it to quit.", \
+      "Pencereyi kapatmak onu gizler; ses çalmaya devam eder. Açmak için tepsi simgesine tıkla, çıkmak için sağ tıkla.") \
+    X(AutostartOption, "Start with Windows", "Windows açılınca başlat") \
+    X(AutostartOptionTip, "Starts in the tray when you sign in to Windows, so your channels are ready.", \
+      "Windows'a giriş yaptığında tepside başlar, böylece kanalların hazır olur.") \
+    X(TrayOpen, "Open PocketSoundMixer", "PocketSoundMixer'ı aç") \
+    X(TrayQuit, "Quit", "Çıkış") \
     X(ThemeDark, "Dark", "Koyu") \
     X(ThemeMidnight, "Midnight", "Gece") \
     X(ThemeGraphite, "Graphite", "Grafit") \
@@ -138,8 +148,11 @@ enum class Language : std::uint8_t { English, Turkish, Count };
     X(HelpAddMic, "+ Add mic channel: a channel for a microphone.", "+ Mikrofon kanalı ekle: bir mikrofon için kanal.") \
     X(HelpReset, "Reset channels: back to Music, Game, Film, Chat, Podcast and Mic.", \
       "Kanalları sıfırla: Music, Game, Film, Chat, Podcast ve Mic'e geri döner.") \
-    X(HelpSettings, "Settings (right): theme (Dark, Midnight, Graphite, Violet or Light) and language (English or Türkçe).", \
-      "Ayarlar (sağda): tema (Koyu, Gece, Grafit, Mor veya Açık) ve dil (English veya Türkçe).") \
+    X(HelpSettings, \
+      "Settings (right): theme (Dark, Midnight, Graphite, Violet or Light), language (English or Türkçe), " \
+      "and on Windows: keep running in the system tray, and start with Windows. Both are on at first.", \
+      "Ayarlar (sağda): tema (Koyu, Gece, Grafit, Mor veya Açık), dil (English veya Türkçe) " \
+      "ve Windows'ta: sistem tepsisinde çalışmaya devam et ve Windows açılınca başlat. İkisi de başta açık.") \
     X(HelpHelp, "Help (far right): this guide.", "Yardım (en sağda): bu rehber.") \
     X(HelpAppsHead, "App channels", "Uygulama kanalları") \
     X(HelpApps1, "\"+ App\" puts apps in a channel. Pick as many as you like, e.g. Spotify and a browser in Music.", \

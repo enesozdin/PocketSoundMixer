@@ -25,7 +25,7 @@ Pencereyi istediğin gibi boyutlandırabilirsin. Pencere, buton satırını ve b
 | **+ Kanal ekle** | Uygulamalar için bir kanal ekler. |
 | **+ Mikrofon kanalı ekle** | Bir mikrofon için kanal ekler (önce sessizde). |
 | **Kanalları sıfırla** | Tüm kanalları altı varsayılan kanalla değiştirir. |
-| **Ayarlar** (sağda) | **Tema**: Koyu, Gece (turkuaz vurgulu, neredeyse siyah), Grafit (siyah ve gri), Mor (koyu mor vurgulu siyah) veya Açık. **Dil**: English (varsayılan) veya Türkçe; tüm mikser bir anda değişir. Seçimlerin hatırlanır. |
+| **Ayarlar** (sağda) | **Tema**: Koyu, Gece (turkuaz vurgulu, neredeyse siyah), Grafit (siyah ve gri), Mor (koyu mor vurgulu siyah) veya Açık. **Dil**: English (varsayılan) veya Türkçe; tüm mikser bir anda değişir. **Windows** (yalnızca Windows): *Kapatınca sistem tepsisinde çalışmaya devam et* ve *Windows açılınca başlat*, ikisi de başta açık; bkz. [Sistem tepsisi ve Windows ile başlatma](#sistem-tepsisi-ve-windows-ile-başlatma). Seçimlerin hatırlanır. |
 | **Yardım** (en sağda) | Pencerenin sağında, seçtiğin dilde kısa bir rehber açar. En üstteki **Kullanım kılavuzunu aç** bu kılavuzu tarayıcında, yine o dilde açar. Kapatmak için Yardım'a tekrar ya da x'e tıkla. |
 
 ## Ana satır (en üst)
@@ -117,6 +117,15 @@ Birkaç hızlı tarif:
 - Bir hazır preseti sildikten sonra preset listesinin en altında **Hazır presetleri geri getir** belirir ve hepsini geri getirir. Hazır presetler düzenlenemez.
 
 Preset adları (Flat, Music, Vocal...) ve varsayılan kanal adları senin verindir, bu yüzden Türkçe arayüzde de değişmez. Kanalları istediğin gibi yeniden adlandırabilirsin.
+
+## Sistem tepsisi ve Windows ile başlatma
+
+Windows'ta mikser sistem tepsisinde (saatin yanındaki simgeler) yaşar, böylece pencere kapalıyken de kanalların çalışmaya devam eder. İki ayar da **Ayarlar > Windows**'ta ve başta açık.
+
+- **Kapatınca sistem tepsisinde çalışmaya devam et**: pencereyi kapatmak onu yalnızca gizler; ses kanalların üzerinden gelmeye devam eder. Pencereyi tekrar açmak için tepsi simgesine tıkla. Mikseri gerçekten kapatmak için simgeye sağ tıklayıp **Çıkış**'ı seç; uygulamaların normale döner. Pencereyi kapatınca mikserin kapanmasını istiyorsan bunu kapat.
+- **Windows açılınca başlat**: Windows'a giriş yaptığında mikser penceresini açmadan tepside başlar.
+- Aynı anda yalnızca bir kopya çalışır. Tekrar başlatırsan (örneğin Başlat menüsünden) zaten çalışan kopyanın penceresi açılır.
+- Windows kapanırken mikser önce ayarlarını kaydeder ve uygulamalarını normal çıkışlarına geri koyar.
 
 ## Ayarların kaydedildiği yer
 

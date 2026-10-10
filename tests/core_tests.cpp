@@ -347,6 +347,8 @@ void testSessionRoundTripAndOldFormat()
     s.outputDevice = "Headphones";
     s.theme = "Light";
     s.language = "tr";
+    s.trayEnabled = false;
+    s.startWithWindows = false;
     s.channels[0].sources = {{"app", "Spotify.exe", {}}, {"app", "chrome.exe", {}}};
     s.channels[3].output = "Headset";
     const auto file = std::filesystem::temp_directory_path() / "psm_test_session.json";
@@ -355,6 +357,8 @@ void testSessionRoundTripAndOldFormat()
     CHECK(psm::loadSession(file, loaded, &err));
     CHECK(loaded.outputDevice == "Headphones");
     CHECK(loaded.theme == "Light" && loaded.language == "tr");
+    CHECK(!loaded.trayEnabled && !loaded.startWithWindows);
+    CHECK(psm::defaultSession().trayEnabled && psm::defaultSession().startWithWindows); // both on by default
     CHECK(loaded.channels[3].output == "Headset" && loaded.channels[0].output.empty());
     CHECK(loaded.channels.back().kind == "mic" && loaded.channels.back().sources.size() == 1);
     CHECK(loaded.channels.size() == 6);

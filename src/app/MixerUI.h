@@ -9,6 +9,7 @@
 
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,15 @@ public:
     void setUiScale(float scale) { uiScale_ = scale; }
     // Windows volume of the Master output device, mirrored by the Master volume slider.
     void setDeviceVolume(DeviceVolume* volume) { deviceVolume_ = volume; }
+    // Windows tray and autostart settings; called when the user flips them in Settings.
+    void setSystemHooks(std::function<void(bool)> trayChanged, std::function<void(bool)> autostartChanged)
+    {
+        trayChanged_ = std::move(trayChanged);
+        autostartChanged_ = std::move(autostartChanged);
+    }
+    bool trayEnabled() const { return trayEnabled_; }
+    // Ends every app capture now, so apps are back on their own outputs (Windows shutdown).
+    void releaseApps();
 
 private:
     static constexpr int kCurvePoints = 64;
@@ -110,6 +120,10 @@ private:
     Theme theme_ = Theme::Dark;
     float uiScale_ = 1.0f;
     DeviceVolume* deviceVolume_ = nullptr;
+    bool trayEnabled_ = true;
+    bool startWithWindows_ = true;
+    std::function<void(bool)> trayChanged_;
+    std::function<void(bool)> autostartChanged_;
     std::string presetError_;
     int pendingRemove_ = -1;
     bool animating_ = false;

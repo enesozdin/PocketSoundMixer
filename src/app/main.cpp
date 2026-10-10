@@ -2,7 +2,9 @@
 #include "MixerUI.h"
 #include "Paths.h"
 #include "Presets.h"
+#include "AppIcon.h"
 #include "Session.h"
+#include "SystemTray.h"
 #include "TurkishGlyphs.h"
 
 #include "imgui.h"
@@ -12,6 +14,7 @@
 #include <GLFW/glfw3.h>
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -27,8 +30,15 @@ void onGlfwError(int code, const char* text)
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    // One copy at a time: starting it again just brings the running one to the front.
+    if (!psm::SystemTray::claimSingleInstance()) return 0;
+    bool launchedToTray = false; // "--tray": started with Windows, so start hidden in the tray
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--tray") == 0) launchedToTray = true;
+    }
+
     const auto configDir = psm::configDirectory();
     const auto presetFile = configDir / "presets.json";
     const auto sessionFile = configDir / "session.json";
@@ -64,6 +74,8 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 #endif
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
+    const bool useTray = psm::SystemTray::supported() && session.trayEnabled;
+    glfwWindowHint(GLFW_VISIBLE, launchedToTray && useTray ? GLFW_FALSE : GLFW_TRUE);
     GLFWwindow* window = glfwCreateWindow(1440, 760, "PocketSoundMixer", nullptr, nullptr);
     if (!window) {
         glfwTerminate();
@@ -79,6 +91,13 @@ int main()
 #endif
         glfwSetWindowSizeLimits(window, static_cast<int>(kMinWindowWidth * minScale), static_cast<int>(kMinWindowHeight * minScale),
                                 GLFW_DONT_CARE, GLFW_DONT_CARE);
+    }
+    {
+        // Window and taskbar icon (GLFW ignores this on macOS, which uses the app bundle's icon).
+        std::vector<unsigned char> small = psm::makeAppIcon(32);
+        std::vector<unsigned char> large = psm::makeAppIcon(64);
+        const GLFWimage icons[2] = {{32, 32, small.data()}, {64, 64, large.data()}};
+        glfwSetWindowIcon(window, 2, icons);
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // vsync caps redraws at the display rate
@@ -113,17 +132,57 @@ int main()
     ui.setDeviceVolume(&deviceVolume);
     ui.setUiScale(scale); // the theme scales the style; applySession applies the saved theme
     ui.applySession(session);
+    // Tray, autostart and shutdown handling (Windows). Its callbacks run inside glfwWaitEvents*,
+    // on this thread, so they can touch the window and UI directly.
+    bool quitRequested = false;
+    const auto showWindow = [window] {
+        glfwShowWindow(window);
+        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) glfwRestoreWindow(window);
+        glfwFocusWindow(window);
+    };
+    psm::SystemTray tray({
+        showWindow,
+        [&quitRequested] { quitRequested = true; },
+        [&] {
+            psm::saveSession(sessionFile, ui.captureSession(), nullptr);
+            presets.saveUserPresets(presetFile, nullptr);
+            ui.releaseApps();
+            engine.stop();
+            quitRequested = true; // in case Windows lets us run on
+        },
+    });
+    if (psm::SystemTray::supported()) {
+        tray.showIcon(session.trayEnabled);
+        psm::SystemTray::setStartWithWindows(session.startWithWindows);
+        ui.setSystemHooks([&tray](bool on) { tray.showIcon(on); },
+                          [](bool on) { psm::SystemTray::setStartWithWindows(on); });
+    }
+    if (launchedToTray && !useTray) showWindow();
+    // With the tray on, closing the window only hides it; the mix keeps playing.
+    struct CloseContext {
+        psm::MixerUI* ui;
+        const std::filesystem::path* sessionFile;
+    } closeContext{&ui, &sessionFile};
+    glfwSetWindowUserPointer(window, &closeContext);
+    glfwSetWindowCloseCallback(window, [](GLFWwindow* w) {
+        auto* ctx = static_cast<CloseContext*>(glfwGetWindowUserPointer(w));
+        if (!psm::SystemTray::supported() || !ctx->ui->trayEnabled()) return;
+        glfwSetWindowShouldClose(w, GLFW_FALSE);
+        glfwHideWindow(w);
+        psm::saveSession(*ctx->sessionFile, ctx->ui->captureSession(), nullptr); // it may run for days now
+    });
+
     if (!audioError.empty()) ui.setStatus(audioError);
     else if (!presetError.empty()) ui.setStatus(presetError);
     else if (!sessionError.empty()) ui.setStatus(sessionError);
 
     double lastTime = glfwGetTime();
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(window) && !quitRequested) {
         // Sleep until input arrives. While meters move, wake at ~30 fps; when idle, rarely.
         // Rendering costs nothing while the user isn't looking at moving audio.
-        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
+        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) || !glfwGetWindowAttrib(window, GLFW_VISIBLE)) {
             glfwWaitEventsTimeout(0.5);
-            engine.mixer().collectGarbage(); // nothing is rendered while minimized
+            engine.mixer().collectGarbage(); // nothing is rendered while minimized or in the tray
             lastTime = glfwGetTime();
             continue;
         }
